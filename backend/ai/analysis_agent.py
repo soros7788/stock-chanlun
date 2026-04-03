@@ -1,0 +1,119 @@
+"""
+缠论 + LLM 智能分析 — 将缠论分析结果交给大模型生成策略建议
+"""
+import json
+import re
+from typing import Optional
+
+
+SYSTEM_PROMPT = """你是专业的缠论技术分析助手，帮助用户分析股票走势并给出操作建议。
+
+分析规则：
+1. 只基于用户提供的 K线/缠论数据进行分析，不臆测
+2. 结合背驰、级别共振、中枢位置综合判断
+3. 输出结构化 JSON，不要输出多余文字
+
+回复格式（严格 JSON）：
+{
+  "direction": "买入|卖出|观望",
+  "confidence": 0.0-1.0,
+  "risk_level": "低|中|高",
+  "entry_price": 数字或null,
+  "stop_loss": 数字或null,
+  "take_profit": 数字或null,
+  "holding_period": "描述",
+  "reasoning": "简明分析理由（50字内）"
+}
+"""
+
+
+def build_analysis_prompt(
+    code: str,
+    level: str,
+    klines: list,
+    trend: str,
+    divergence: Optional[dict],
+    signals: list,
+    zhongshus: list,
+    bis: list,
+) -> str:
+    """构造发送给 LLM 的分析 prompt"""
+
+    # 截取最近 30 根 K 线
+    recent = klines[-30:] if len(klines) > 30 else klines
+    kl_text = "\n".join(
+        f"{k['date']}  开:{k['open']} 高:{k['high']} 低:{k['low']} 收:{k['close']} 量:{k.get('volume',0)}"
+        for k in recent
+    )
+
+    # 笔信息
+    bi_text = ""
+    if bis:
+        for b in bis[-5:]:
+            bi_text += f"  [{b['start']} ~ {b['end']}] {b['direction']}段 高:{b['high']} 低:{b['low']}\n"
+
+    # 中枢
+    zs_text = ""
+    if zhongshus:
+        for z in zhongshus[-3:]:
+            zs_text += f"  [{z['start']} ~ {z['end']}] 中枢 高:{z['range_high']} 低:{z['range_low']}\n"
+
+    # 背驰
+    div_text = ""
+    if divergence:
+        div_text = f"  类型:{divergence.get('type')} 概率:{divergence.get('probability')} 描述:{divergence.get('description','')}\n"
+
+    # 买卖点
+    sig_text = ""
+    if signals:
+        for s in signals[-5:]:
+            sig_text += f"  {s.get('datetime','')} {s.get('type','')} @ {s.get('price','')} ({s.get('description','')})\n"
+
+    prompt = f"""分析股票 {code}（{level}级别），当前趋势：{trend}
+
+【最近30根K线】
+{kl_text}
+
+【最近笔】
+{bi_text or '无'}
+
+【最近中枢】
+{zs_text or '无'}
+
+【背驰信号】
+{div_text or '无'}
+
+【最近买卖点】
+{sig_text or '无'}
+
+请根据以上缠论数据，输出结构化操作建议（仅返回JSON）："""
+
+    return prompt
+
+
+def parse_llm_response(text: str) -> dict:
+    m = re.search(r"```(?:json)?\s*({\n.*?})\s*```", text, re.DOTALL)
+    if m:
+        raw = m.group(1)
+    else:
+        # 找第一个 { 到最后一个 }
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            raw = text[start:end + 1]
+        else:
+            raw = text.strip()
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {
+            "direction": "观望",
+            "confidence": 0.0,
+            "risk_level": "中",
+            "entry_price": None,
+            "stop_loss": None,
+            "take_profit": None,
+            "holding_period": "未知",
+            "reasoning": f"LLM 返回格式解析失败：{text[:100]}"
+        }

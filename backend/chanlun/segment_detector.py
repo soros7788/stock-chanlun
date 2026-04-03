@@ -1,0 +1,134 @@
+"""
+线段与中枢检测器
+"""
+from typing import Optional
+from datetime import datetime
+from .elements import Bi, XiangSegment, Zhongshu
+
+
+class SegmentDetector:
+    """
+    线段规则:
+    - 3笔（或以上）重叠构成线段
+    - 线段被更高一级别笔破坏则线段结束
+
+    中枢规则:
+    - 3个（或以上）连续同级别线段的重叠区域构成中枢
+    """
+
+    def __init__(self, bis: list[Bi]):
+        self.bis = bis
+
+    def detect_segments(self, min_overlap_bis: int = 3, max_iterations: int = 10000) -> list[XiangSegment]:
+        """检测线段"""
+        if len(self.bis) < 3:
+            return []
+
+        segments: list[XiangSegment] = []
+        i = 0
+        iterations = 0
+
+        while i <= len(self.bis) - min_overlap_bis:
+            # 防止死循环
+            iterations += 1
+            if iterations > max_iterations:
+                break
+
+            # 取连续3笔检查重叠
+            group = self.bis[i:i + min_overlap_bis]
+            if self._has_overlap(group):
+                # 检查是否可延伸
+                start = group[0].start
+                end = group[-1].end
+                direction = group[0].direction
+                high = max(b.high for b in group)
+                low = min(b.low for b in group)
+                bi_ids = [b.id for b in group]
+
+                # 尝试延伸
+                extended = True
+                extend_iterations = 0
+                while extended and extend_iterations < 1000:
+                    extended = False
+                    extend_iterations += 1
+                    next_idx = i + len(group)
+                    if next_idx < len(self.bis):
+                        next_b = self.bis[next_idx]
+                        if next_b.direction == direction:
+                            if self._overlaps(next_b, high, low):
+                                high = max(high, next_b.high)
+                                low = min(low, next_b.low)
+                                bi_ids.append(next_b.id)
+                                end = next_b.end
+                                extended = True
+
+                segments.append(XiangSegment(
+                    id=f"xiang_{len(segments)+1}",
+                    start=start,
+                    end=end,
+                    direction=direction,
+                    high=high,
+                    low=low,
+                    bi_ids=bi_ids,
+                    level=2
+                ))
+                i += len(bi_ids)
+            else:
+                i += 1
+
+        return segments
+
+    def _has_overlap(self, bis_group: list[Bi]) -> bool:
+        """判断一组笔是否有重叠"""
+        if len(bis_group) < 2:
+            return False
+        high = min(b.high for b in bis_group)
+        low = max(b.low for b in bis_group)
+        return high > low  # 有重叠区域
+
+    def _overlaps(self, bi: Bi, existing_high: float, existing_low: float) -> bool:
+        """判断笔是否与已有区域重叠"""
+        return bi.high > existing_low and bi.low < existing_high
+
+    def detect_zhongshus(self, segments: list[XiangSegment]) -> list[Zhongshu]:
+        """
+        检测中枢:
+        3个连续同级别线段的重叠区域构成中枢
+        """
+        if len(segments) < 3:
+            return []
+
+        zhongshus: list[Zhongshu] = []
+        i = 0
+
+        while i <= len(segments) - 3:
+            group = segments[i:i + 3]
+
+            # 计算重叠区间
+            range_high = min(s.high for s in group)
+            range_low = max(s.low for s in group)
+
+            if range_high > range_low:
+                # 有重叠，构成中枢
+                zhongshus.append(Zhongshu(
+                    id=f"zs_{len(zhongshus)+1}",
+                    start=group[0].start,
+                    end=group[-1].end,
+                    range_high=float(range_high),
+                    range_low=float(range_low),
+                    xiang_ids=[s.id for s in group],
+                    level=group[0].level
+                ))
+                i += 3
+            else:
+                i += 1
+
+        return zhongshus
+
+    def get_zhongshu_for_price(self, zhongshus: list[Zhongshu],
+                                 price: float) -> Optional[Zhongshu]:
+        """找到价格所在的中枢"""
+        for zs in reversed(zhongshus):
+            if zs.range_low <= price <= zs.range_high:
+                return zs
+        return None

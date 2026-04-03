@@ -1,0 +1,164 @@
+<template>
+  <div class="layout">
+    <nav class="nav">
+      <div class="nav-inner">
+        <router-link to="/" class="nav-brand">ChanStock</router-link>
+        <div class="nav-links">
+          <router-link to="/" class="nav-link">首页</router-link>
+          <router-link to="/watchlist" class="nav-link active">自选股</router-link>
+        </div>
+        <div class="nav-search" style="margin-left:auto">
+          <input v-model="addCode" @keydown.enter="addStock" placeholder="输入代码添加自选" class="search-input" />
+          <button class="btn btn-primary" @click="addStock">添加</button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container">
+      <div class="watchlist-header">
+        <h1>自选股监控</h1>
+        <span class="count-badge">{{ store.stocks.length }} 支</span>
+      </div>
+
+      <div v-if="store.loading" class="loading-state">
+        <div class="spinner" />
+        <span>加载中...</span>
+      </div>
+
+      <div v-else-if="store.stocks.length === 0" class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+        </svg>
+        <h2>暂无自选股</h2>
+        <p>添加股票到自选列表开始监控</p>
+      </div>
+
+      <div v-else class="stock-table">
+        <div class="table-header">
+          <span>代码</span>
+          <span>名称</span>
+          <span>现价</span>
+          <span>涨跌幅</span>
+          <span></span>
+        </div>
+        <div
+          v-for="stock in store.stocks"
+          :key="stock.code"
+          class="table-row"
+          @click="goToStock(stock.code)"
+        >
+          <span class="mono">{{ stock.code }}</span>
+          <span class="name">{{ stock.name }}</span>
+          <span class="mono">{{ stock.price?.toFixed(2) || '—' }}</span>
+          <span class="mono" :class="stock.change_pct > 0 ? 'price-up' : 'price-down'">
+            {{ stock.change_pct > 0 ? '+' : '' }}{{ stock.change_pct?.toFixed(2) || 0 }}%
+          </span>
+          <button class="remove-btn" @click.stop="removeStock(stock.code)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useWatchlistStore } from '../stores/watchlist'
+
+const router = useRouter()
+const store = useWatchlistStore()
+const addCode = ref('')
+
+function goToStock(code: string) { router.push(`/stock/${code}`) }
+
+async function addStock() {
+  if (!addCode.value.trim()) return
+  await store.addStock(addCode.value.trim().replace(/\D/g, '').padStart(6, '0'))
+  addCode.value = ''
+}
+
+async function removeStock(code: string) {
+  await store.removeStock(code)
+}
+
+onMounted(() => store.fetchWatchlist())
+</script>
+
+<style scoped>
+.layout { min-height: 100vh; }
+
+.nav-search { display: flex; gap: 8px; }
+.search-input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  width: 200px;
+  outline: none;
+}
+.search-input:focus { border-color: var(--accent-blue); }
+
+.container { max-width: 900px; margin: 40px auto; padding: 0 24px; }
+
+.watchlist-header { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
+.watchlist-header h1 { font-size: 1.5rem; }
+.count-badge {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.loading-state { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 80px; color: var(--text-secondary); }
+.spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.empty-state { text-align: center; padding: 80px; color: var(--text-muted); }
+.empty-state h2 { margin: 16px 0 8px; font-size: 1.3rem; color: var(--text-secondary); }
+.empty-state p { color: var(--text-muted); }
+
+.stock-table { display: flex; flex-direction: column; gap: 2px; }
+
+.table-header, .table-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 100px 120px 40px;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 8px;
+}
+.table-header {
+  background: var(--bg-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.table-row {
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.table-row:hover { background: var(--bg-hover); }
+
+.remove-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+.remove-btn:hover { color: var(--accent-red); background: rgba(248,81,73,0.1); }
+
+.name { font-weight: 500; }
+</style>
