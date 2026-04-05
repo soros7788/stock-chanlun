@@ -34,8 +34,9 @@ class SignalDetector:
         signals.extend(first_buys)
         signals.extend(self._detect_2nd_buy(first_buys))
         signals.extend(self._detect_3rd_buy())
-        signals.extend(self._detect_1st_sell())
-        signals.extend(self._detect_2nd_sell())
+        first_sells = self._detect_1st_sell()
+        signals.extend(first_sells)
+        signals.extend(self._detect_2nd_sell(first_sells))
         signals.extend(self._detect_3rd_sell())
         return sorted(signals, key=lambda s: s.datetime)
 
@@ -74,27 +75,30 @@ class SignalDetector:
 
     def _detect_2nd_buy(self, first_buys: list[BuySellPoint]) -> list[BuySellPoint]:
         """
-        二买: 一买后的回调低点（不破一买前低）
+        二买: 一买后的回调低点（不破一买点）
+        注意：回调低点须出现在一买之后（下笔终点 > 一买点时间），
+        而不是起始于一买之后——当下笔起点早于一买但终点落在一买后时
+        同样满足条件。
         """
         signals = []
         if not first_buys or not self.bis:
             return signals
 
         for fb in first_buys:
-            # 在一买之后找向上段后的向下回调低点
+            # 在一买之后结束的下探笔
             after_first = [b for b in self.bis
                           if b.direction == "down"
-                          and b.start > fb.datetime]
+                          and b.end > fb.datetime]
             for b in after_first:
-                # 回调低点不破一买点
-                if b.low >= fb.price * 0.95:
+                # 回调低点不破一买点（含容差 ±3%）
+                if b.low >= fb.price * 0.97:
                     signals.append(BuySellPoint(
                         type="二买",
                         level=self.level,
                         price=float(b.low),
                         datetime=b.end,
                         confidence=0.70,
-                        stop_loss=float(b.low * 0.97),
+                        stop_loss=float(min(b.low * 0.97, fb.price * 0.95)),
                         description=f"回调二买: 回踩{b.low:.2f}不破一买{fb.price:.2f}"
                     ))
                     break
@@ -102,34 +106,47 @@ class SignalDetector:
 
     def _detect_3rd_buy(self) -> list[BuySellPoint]:
         """
-        三买: 突破中枢后回踩，不跌入中枢
+        三买: 向上笔突破某中枢后，回踩低点不跌入该中枢上沿。
+        用最近被向上笔确认突破的中枢，而非简单取最后一个。
         """
         signals = []
         if not self.zhongshus or not self.bis:
             return signals
 
-        last_zs = self.zhongshus[-1]
+        for zs in reversed(self.zhongshus):
+            # 找向上笔是否突破本中枢
+            break_up = None
+            for b in self.bis:
+                if b.direction == "up" and b.end > zs.end and b.high > zs.range_high:
+                    break_up = b
+                    break
 
-        for b in self.bis:
-            # 向上笔突破中枢
-            if b.direction == "up" and b.high > last_zs.range_high:
-                # 找后续向下回调
-                after_break = [n for n in self.bis
-                              if n.direction == "down" and n.start > b.end]
-                if after_break:
-                    retest = after_break[0]
-                    # 回踩不破中枢上沿
-                    if retest.low > last_zs.range_high:
-                        signals.append(BuySellPoint(
-                            type="三买",
-                            level=self.level,
-                            price=float(retest.low),
-                            datetime=retest.end,
-                            confidence=0.80,
-                            stop_loss=float(last_zs.range_low),
-                            take_profit=float(retest.low * 1.05),
-                            description=f"三买: 回踩{retest.low:.2f}不破中枢{last_zs.range_high:.2f}"
-                        ))
+            if not break_up:
+                continue
+
+            # 找突破后紧接着的下探笔
+            retest_candidates = [
+                b for b in self.bis
+                if b.direction == "down" and b.start > break_up.end
+            ]
+            if not retest_candidates:
+                continue
+
+            retest = retest_candidates[0]
+            # 回踩低点不跌入中枢上沿 = 三买成立
+            if retest.low > zs.range_high:
+                signals.append(BuySellPoint(
+                    type="三买",
+                    level=self.level,
+                    price=float(retest.low),
+                    datetime=retest.end,
+                    confidence=0.80,
+                    stop_loss=float(zs.range_low),
+                    take_profit=float(break_up.high * 1.05),
+                    description=f"三买: 回踩{retest.low:.2f}不破中枢{zs.range_high:.2f}"
+                ))
+            break  # 只取最近的一个三买
+
         return signals
 
     # ── 上涨买卖点 ──────────────────────────────────────────────
@@ -161,19 +178,22 @@ class SignalDetector:
                     ))
         return signals
 
-    def _detect_2nd_sell(self) -> list[BuySellPoint]:
-        """二卖: 一卖后反弹高点（不破一卖前高）"""
+    def _detect_2nd_sell(self, first_sells: list[BuySellPoint]) -> list[BuySellPoint]:
+        """
+        二卖: 一卖后反弹高点（不破一卖前高）
+        """
         signals = []
-        first_sells = self._detect_1st_sell()
         if not first_sells or not self.bis:
             return signals
 
         for fs in first_sells:
+            # 在一卖之后结束的上探笔
             after_first = [b for b in self.bis
                           if b.direction == "up"
-                          and b.start > fs.datetime]
+                          and b.end > fs.datetime]
             for b in after_first:
-                if b.high <= fs.price * 1.02:
+                # 反弹高点不超过一卖点（含 ±2% 容差）
+                if b.high <= fs.price * 1.03:
                     signals.append(BuySellPoint(
                         type="二卖",
                         level=self.level,
@@ -186,28 +206,45 @@ class SignalDetector:
         return signals
 
     def _detect_3rd_sell(self) -> list[BuySellPoint]:
-        """三卖: 跌破中枢后反弹，不突破中枢"""
+        """
+        三卖: 向下笔跌破某中枢后，反弹高点不突破该中枢下沿。
+        用最近被向下笔确认突破的中枢。
+        """
         signals = []
         if not self.zhongshus or not self.bis:
             return signals
 
-        last_zs = self.zhongshus[-1]
+        for zs in reversed(self.zhongshus):
+            # 找向下笔是否跌破本中枢
+            break_down = None
+            for b in self.bis:
+                if b.direction == "down" and b.end > zs.end and b.low < zs.range_low:
+                    break_down = b
+                    break
 
-        for b in self.bis:
-            if b.direction == "down" and b.low < last_zs.range_low:
-                after_break = [n for n in self.bis
-                              if n.direction == "up" and n.start > b.end]
-                if after_break:
-                    retest = after_break[0]
-                    if retest.high < last_zs.range_low:
-                        signals.append(BuySellPoint(
-                            type="三卖",
-                            level=self.level,
-                            price=float(retest.high),
-                            datetime=retest.end,
-                            confidence=0.75,
-                            description=f"三卖: 反弹{retest.high:.2f}不破中枢{last_zs.range_low:.2f}"
-                        ))
+            if not break_down:
+                continue
+
+            # 找跌破后紧接着的上探笔
+            retest_candidates = [
+                b for b in self.bis
+                if b.direction == "up" and b.start > break_down.end
+            ]
+            if not retest_candidates:
+                continue
+
+            retest = retest_candidates[0]
+            if retest.high < zs.range_low:
+                signals.append(BuySellPoint(
+                    type="三卖",
+                    level=self.level,
+                    price=float(retest.high),
+                    datetime=retest.end,
+                    confidence=0.75,
+                    description=f"三卖: 反弹{retest.high:.2f}不破中枢{zs.range_low:.2f}"
+                ))
+            break
+
         return signals
 
     def detect_trend(self) -> str:

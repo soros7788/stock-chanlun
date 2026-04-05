@@ -130,38 +130,49 @@ class StrategyEngine:
 
     def _calc_levels(self, signal: Optional[BuySellPoint],
                      direction: str) -> tuple:
-        """计算入场价、止损价、止盈价"""
-        entry = self.current_price
+        """
+        计算入场价、止损价、止盈价。
 
+        一买 / 三买：入场价 = 信号价位（背驰点 / 回踩低点），止损在信号价下方。
+        二买：入场价 = 信号价位（回踩低点），止损在信号价和一买价格之间取更低的。
+        一卖 / 三卖：入场价 = 信号价位，止损在信号价上方。
+        二卖：入场价 = 信号价位（反弹高点），止损在信号价和一卖价格之间取更高的。
+
+        若无信号，入场价用当前价，止损止盈按当前价 ±3% / ±5% 估算。
+        """
         if not signal:
-            return entry, None, None
+            return self.current_price, round(self.current_price * 0.97, 2), round(self.current_price * 1.05, 2)
+
+        # 入场价 = 信号对应的实际价位，而非当前市场价
+        entry = round(signal.price, 2)
 
         if direction == "买入":
-            stop_loss = signal.stop_loss or round(self.current_price * 0.97, 2)
-            take_profit = signal.take_profit or round(
-                self.current_price * 1.05, 2)
-            # 做多：须 止损 < 入场 < 止盈（纠正信号里 SL/TP 填反或混用旧字段）
-            if stop_loss is not None and take_profit is not None:
-                if stop_loss > take_profit:
-                    stop_loss, take_profit = take_profit, stop_loss
-                if stop_loss >= entry:
-                    stop_loss = round(entry * 0.97, 2)
-                if take_profit <= entry:
-                    take_profit = round(entry * 1.05, 2)
+            if "二买" in signal.type:
+                # 二买止损：信号价下方3%，但不超过一买点（确保不破一买）
+                sl = signal.stop_loss or round(entry * 0.97, 2)
+                sl = round(min(sl, entry * 0.97), 2)
+            else:
+                sl = signal.stop_loss or round(entry * 0.97, 2)
+            tp = signal.take_profit or round(entry * 1.05, 2)
+            if sl >= entry:
+                sl = round(entry * 0.97, 2)
+            if tp <= entry:
+                tp = round(entry * 1.05, 2)
         else:
-            stop_loss = signal.stop_loss or round(self.current_price * 1.03, 2)
-            take_profit = signal.take_profit or round(
-                self.current_price * 0.95, 2)
-            # 做空：须 止盈 < 入场 < 止损
-            if stop_loss is not None and take_profit is not None:
-                if take_profit > stop_loss:
-                    stop_loss, take_profit = take_profit, stop_loss
-                if stop_loss <= entry:
-                    stop_loss = round(entry * 1.03, 2)
-                if take_profit >= entry:
-                    take_profit = round(entry * 0.95, 2)
+            if "二卖" in signal.type:
+                sl = signal.stop_loss or round(entry * 1.03, 2)
+                sl = round(max(sl, entry * 1.03), 2)
+            else:
+                sl = signal.stop_loss or round(entry * 1.03, 2)
+            tp = signal.take_profit or round(entry * 0.95, 2)
+            if sl <= entry:
+                sl = round(entry * 1.03, 2)
+            if tp >= entry:
+                tp = round(entry * 0.95, 2)
+            if sl is not None and tp is not None and sl < tp:
+                sl, tp = tp, sl
 
-        return entry, stop_loss, take_profit
+        return entry, sl, tp
 
     def _calc_holding_period(self) -> str:
         """操作窗口"""
