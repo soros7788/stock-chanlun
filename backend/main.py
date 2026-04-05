@@ -2,6 +2,25 @@
 ChanStock — 缠论智能股票分析系统
 FastAPI 后端入口
 """
+# requests 补丁：只 patch HTTPAdapter.send，这是所有请求的最终出口。
+# 对 eastmoney 等金融域名自动禁用代理（Windows 系统代理导致 SSL 挂起）。
+import requests as _req_mod
+_NO_PROXY = {"http": None, "https": None}
+_EM_HOSTS = ("eastmoney", "qt.gtimg", "sinajs", "ifzq", "10jqka")
+_orig_send = _req_mod.adapters.HTTPAdapter.send
+
+def _patched_send(adapter, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
+    url = getattr(request, 'url', '') or ''
+    if timeout is None and url:
+        timeout = 12.0
+    if proxies is None and url and any(h in url for h in _EM_HOSTS):
+        proxies = _NO_PROXY
+        verify = False
+    return _orig_send(adapter, request, stream=stream, timeout=timeout, verify=verify, cert=cert, proxies=proxies)
+
+_req_mod.adapters.HTTPAdapter.send = _patched_send
+print("[补丁] requests: timeout=12s + 禁用代理 for eastmoney")
+
 import math
 import os
 
@@ -30,6 +49,8 @@ from services.akshare_service import (
     get_kline_hist, get_realtime_quote, search_stocks,
     get_stock_info, get_index_quote, normalize_stock_code,
     get_daily_hot_stocks, warm_hot_cache,
+    get_market_overview_bundle, get_stock_news,
+    get_stock_depth_em, get_stock_boards_em, get_stock_symbol_news_em,
 )
 
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
@@ -109,6 +130,28 @@ def hot_stocks(limit: int = Query(15, ge=1, le=50)):
     return {"stocks": stocks, "total": len(stocks), "error": None if stocks else "获取失败，请稍后重试"}
 
 
+@app.get("/api/market/overview", tags=["数据"])
+def market_overview():
+    """大盘概览：主要指数、A股涨跌家数、行业板块领涨/领跌"""
+    try:
+        return get_market_overview_bundle()
+    except Exception as e:
+        print(f"大盘概览获取失败: {e}")
+        return {
+            "indices": {},
+            "market_breadth": {"advancers": 0, "decliners": 0, "unchanged": 0},
+            "sectors": [],
+            "sectors_top": [],
+            "sectors_bottom": [],
+        }
+
+
+@app.get("/api/news", tags=["数据"])
+def news(limit: int = Query(10, ge=1, le=30)):
+    """财经新闻列表"""
+    return {"items": get_stock_news(limit)}
+
+
 @app.get("/api/stocks/{code}/info", tags=["数据"])
 def stock_info(code: str):
     """获取股票基本信息"""
@@ -117,26 +160,58 @@ def stock_info(code: str):
     return {"code": sym, "exchange": exchange, "info": info}
 
 
+@app.get("/api/stocks/{code}/extras", tags=["数据"])
+def stock_extras(
+    code: str,
+    news_limit: int = Query(8, ge=1, le=20),
+):
+    """个股扩展：五档盘口、行业/资料要点、东方财富个股新闻（聚合，减少前端请求次数）"""
+    sym, exchange = normalize_stock_code(code)
+    return {
+        "code": sym,
+        "exchange": exchange,
+        "depth": get_stock_depth_em(sym),
+        "boards": get_stock_boards_em(sym),
+        "news": get_stock_symbol_news_em(sym, news_limit),
+    }
+
+
 @app.get("/api/stocks/{code}/quote", tags=["数据"])
 def realtime_quote(code: str):
-    """实时行情"""
+    """实时行情（腾讯列表解析失败时用 get_stock_info 同一数据源兜底）"""
     sym, _ = normalize_stock_code(code)
     df = get_realtime_quote([code])
-    if df.empty:
-        raise HTTPException(status_code=404, detail="股票未找到")
-    row = df.iloc[0]
-    return {
-        "code": row.get("代码", sym),
-        "name": row.get("名称", ""),
-        "price": float(row.get("最新价", 0) or 0),
-        "change_pct": float(row.get("涨跌幅", 0) or 0),
-        "volume": float(row.get("成交量", 0) or 0),
-        "amount": float(row.get("成交额", 0) or 0),
-        "high": float(row.get("最高", 0) or 0),
-        "low": float(row.get("最低", 0) or 0),
-        "open": float(row.get("今开", 0) or 0),
-        "prev_close": float(row.get("昨收", 0) or 0),
-    }
+    if not df.empty:
+        row = df.iloc[0]
+        return {
+            "code": row.get("代码", sym),
+            "name": row.get("名称", ""),
+            "price": float(row.get("最新价", 0) or 0),
+            "change_pct": float(row.get("涨跌幅", 0) or 0),
+            "volume": float(row.get("成交量", 0) or 0),
+            "amount": float(row.get("成交额", 0) or 0),
+            "high": float(row.get("最高", 0) or 0),
+            "low": float(row.get("最低", 0) or 0),
+            "open": float(row.get("今开", 0) or 0),
+            "prev_close": float(row.get("昨收", 0) or 0),
+        }
+
+    info = get_stock_info(code)
+    if info and (info.get("现价") or info.get("名称")):
+        return {
+            "code": str(info.get("代码", sym)),
+            "name": str(info.get("名称", "")),
+            "price": _finite_float(info.get("现价")),
+            "change_pct": _finite_float(info.get("涨跌幅")),
+            "volume": _finite_float(info.get("成交量")),
+            "amount": _finite_float(info.get("成交额")),
+            "high": _finite_float(info.get("最高")),
+            "low": _finite_float(info.get("最低")),
+            "open": _finite_float(info.get("今开")),
+            "prev_close": _finite_float(info.get("昨收")),
+        }
+
+    raise HTTPException(status_code=404, detail="股票未找到")
 
 
 @app.get("/api/stocks/{code}/kline", tags=["数据"])

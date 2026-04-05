@@ -70,6 +70,36 @@ export interface HotStock {
   volume?: number
 }
 
+/** 首页大盘概览：主要指数一行 */
+export interface MarketOverviewIndex {
+  code: string
+  name: string
+  price: number
+  change_pct: number
+}
+
+export interface MarketOverview {
+  indices: Record<string, MarketOverviewIndex>
+  market_breadth: { advancers: number; decliners: number; unchanged: number }
+  sectors: Array<{ name: string; change_pct: number; kind?: string }>
+  sectors_top: Array<{ name: string; change_pct: number }>
+  sectors_bottom: Array<{ name: string; change_pct: number }>
+}
+
+export interface MarketSector {
+  name: string
+  change_pct: number
+  kind?: string
+}
+
+export interface NewsItem {
+  title: string
+  time: string
+  source: string
+  url: string
+  digest: string
+}
+
 export interface Quote {
   code: string
   name: string
@@ -81,6 +111,59 @@ export interface Quote {
   open: number
   prev_close: number
   amount: number
+}
+
+/** 腾讯行情接口解析的基本面/行情字段（与后端 get_stock_info 一致） */
+export interface DepthLevel {
+  price: number
+  volume: number
+}
+
+export interface StockDepth {
+  asks: DepthLevel[]
+  bids: DepthLevel[]
+}
+
+export interface BoardHighlight {
+  label: string
+  value: string
+}
+
+export interface StockBoards {
+  industry: string
+  highlights: BoardHighlight[]
+}
+
+export interface StockSymbolNewsItem {
+  title: string
+  time: string
+  source: string
+  url: string
+}
+
+export interface StockExtras {
+  code: string
+  exchange: string
+  depth: StockDepth
+  boards: StockBoards
+  news: StockSymbolNewsItem[]
+}
+
+export interface StockInfoFields {
+  代码?: string
+  名称?: string
+  现价?: number
+  涨跌幅?: number
+  涨跌额?: number
+  成交量?: number
+  成交额?: number
+  振幅?: number
+  最高?: number
+  最低?: number
+  今开?: number
+  昨收?: number
+  市净率?: number
+  市盈率?: number
 }
 
 export interface ChanlunResult {
@@ -132,8 +215,25 @@ export const stockApi = {
     })
   },
 
+  marketOverview() {
+    return api.get<MarketOverview>('/market/overview', { timeout: 90000 })
+  },
+
+  news(limit = 10) {
+    return api.get<{ items: NewsItem[] }>('/news', { params: { limit }, timeout: 20000 })
+  },
+
   info(code: string) {
-    return api.get(`/stocks/${code}/info`)
+    return api.get<{ code: string; exchange: string; info: StockInfoFields }>(
+      `/stocks/${code}/info`
+    )
+  },
+
+  extras(code: string, newsLimit = 8) {
+    return api.get<StockExtras>(`/stocks/${code}/extras`, {
+      params: { news_limit: newsLimit },
+      timeout: 45000,
+    })
   },
 
   quote(code: string) {

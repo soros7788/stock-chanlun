@@ -51,11 +51,11 @@
           <div class="stock-header">
             <div>
               <div class="stock-code-label mono">{{ stockCode }}</div>
-              <div class="stock-name-label">{{ quote?.name || stockCode }}</div>
+              <div class="stock-name-label">{{ headerQuote?.name || stockCode }}</div>
             </div>
             <div class="stock-price-block">
               <div class="price-current mono">
-                {{ quote?.price?.toFixed(2) || '—' }}
+                {{ headerQuote?.price != null ? headerQuote.price.toFixed(2) : '—' }}
               </div>
               <div
                 class="price-change mono"
@@ -69,19 +69,19 @@
           <div class="price-stats">
             <div class="stat-row">
               <span class="stat-label">开盘</span>
-              <span class="stat-value mono">{{ quote?.open?.toFixed(2) || '—' }}</span>
+              <span class="stat-value mono">{{ statPrice(headerQuote?.open) }}</span>
             </div>
             <div class="stat-row">
               <span class="stat-label">最高</span>
-              <span class="stat-value mono price-up">{{ quote?.high?.toFixed(2) || '—' }}</span>
+              <span class="stat-value mono price-up">{{ statPrice(headerQuote?.high) }}</span>
             </div>
             <div class="stat-row">
               <span class="stat-label">最低</span>
-              <span class="stat-value mono price-down">{{ quote?.low?.toFixed(2) || '—' }}</span>
+              <span class="stat-value mono price-down">{{ statPrice(headerQuote?.low) }}</span>
             </div>
             <div class="stat-row">
               <span class="stat-label">成交量</span>
-              <span class="stat-value mono">{{ formatVolume(quote?.volume) || '—' }}</span>
+              <span class="stat-value mono">{{ formatVolume(headerQuote?.volume) || '—' }}</span>
             </div>
           </div>
         </div>
@@ -133,6 +133,28 @@
             <IndicatorSelector />
           </div>
         </div>
+
+        <!-- 主图区域上方：基本资料（与左侧行情互补） -->
+        <div v-if="infoPanelRows.length > 0" class="company-info card">
+          <div class="company-info-head">
+            <span class="company-info-title">基本资料</span>
+            <span v-if="stockInfo?.名称" class="company-info-name">{{ stockInfo.名称 }}</span>
+          </div>
+          <div class="company-info-grid">
+            <div
+              v-for="row in infoPanelRows"
+              :key="row.key"
+              class="company-info-cell"
+            >
+              <span class="ci-label">{{ row.label }}</span>
+              <span
+                class="ci-value mono"
+                :class="row.valueClass"
+              >{{ row.value }}</span>
+            </div>
+          </div>
+        </div>
+
         <KLineChart
           ref="klineChartRef"
           :klines="store.klines"
@@ -150,6 +172,82 @@
         <SKDJChart v-if="store.indicators.skdj" :klines="store.klines" class="sub-chart" />
       </div>
 
+      <!-- 盘口 / 板块 / 个股新闻（K 线与策略之间的竖栏） -->
+      <aside class="chart-rail">
+        <div class="card rail-card">
+          <div class="card-title">五档盘口</div>
+          <div v-if="hasDepth" class="depth-wrap">
+            <div class="depth-head">
+              <span />
+              <span class="dh-p">价格</span>
+              <span class="dh-v">量</span>
+            </div>
+            <div
+              v-for="(row, i) in depthAsks"
+              :key="'a-' + i"
+              class="depth-row depth-sell"
+            >
+              <span class="depth-lab">卖{{ 5 - i }}</span>
+              <span class="mono depth-price">{{ fmtDepthPrice(row.price) }}</span>
+              <span class="mono depth-vol">{{ fmtDepthVol(row.volume) }}</span>
+            </div>
+            <div class="depth-divider" />
+            <div
+              v-for="(row, i) in depthBids"
+              :key="'b-' + i"
+              class="depth-row depth-buy"
+            >
+              <span class="depth-lab">买{{ i + 1 }}</span>
+              <span class="mono depth-price">{{ fmtDepthPrice(row.price) }}</span>
+              <span class="mono depth-vol">{{ fmtDepthVol(row.volume) }}</span>
+            </div>
+          </div>
+          <p v-else class="rail-empty">暂无盘口数据</p>
+        </div>
+
+        <div class="card rail-card">
+          <div class="card-title">所属板块</div>
+          <div v-if="extras?.boards?.industry" class="sector-main mono">{{ extras.boards.industry }}</div>
+          <p v-else-if="boardHighlightRows.length" class="rail-hint">行业未标注</p>
+          <p v-else class="rail-empty">暂无板块资料</p>
+          <ul v-if="boardHighlightRows.length" class="board-highlights">
+            <li v-for="(h, idx) in boardHighlightRows" :key="'bh-' + idx">
+              <span class="bh-lab">{{ h.label }}</span>
+              <span class="bh-val mono">{{ h.value }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="card rail-card rail-card-news">
+          <div class="card-title">公司新闻</div>
+          <div v-if="extras?.news?.length" class="news-rail-list">
+            <template v-for="(n, idx) in extras.news" :key="'sn-' + idx">
+              <a
+                v-if="n.url"
+                :href="n.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="news-rail-item"
+              >
+                <span class="news-rail-title">{{ n.title }}</span>
+                <span class="news-rail-meta">
+                  <span v-if="n.source" class="news-rail-src">{{ n.source }}</span>
+                  <span v-if="n.time" class="news-rail-time">{{ n.time }}</span>
+                </span>
+              </a>
+              <div v-else class="news-rail-item news-rail-item--nolink">
+                <span class="news-rail-title">{{ n.title }}</span>
+                <span class="news-rail-meta">
+                  <span v-if="n.source" class="news-rail-src">{{ n.source }}</span>
+                  <span v-if="n.time" class="news-rail-time">{{ n.time }}</span>
+                </span>
+              </div>
+            </template>
+          </div>
+          <p v-else class="rail-empty">暂无相关新闻</p>
+        </div>
+      </aside>
+
       <!-- Right: AI Strategy -->
       <aside class="sidebar-right">
         <StrategyCard :signal="store.aiSignal" />
@@ -162,7 +260,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useChanlunStore, type LevelOption } from '../stores/chanlun'
-import { stockApi } from '../api/stock'
+import { stockApi, type StockInfoFields, type StockExtras, type Quote } from '../api/stock'
 import KLineChart from '../components/Chart/KLineChart.vue'
 import VolumeChart from '../components/Chart/VolumeChart.vue'
 import MACDChart from '../components/Chart/MACDChart.vue'
@@ -182,8 +280,50 @@ const loadingAny = computed(() =>
   store.loadingKline || store.loadingChanlun || store.loadingAI
 )
 const error = computed(() => store.error)
-const quote = ref<any>(null)
+const quote = ref<Quote | null>(null)
+const stockInfo = ref<StockInfoFields | null>(null)
+const extras = ref<StockExtras | null>(null)
 const isWatching = ref(false)
+
+function _num(v: unknown): number | null {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+function statPrice(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return '—'
+  return v.toFixed(2)
+}
+
+/** 左侧报价区：合并 /quote 与 /info，任一来源有有效现价即展示；避免 quote 对象不完整时全是「—」 */
+const headerQuote = computed((): Quote | null => {
+  const q = quote.value
+  const s = stockInfo.value as Record<string, unknown> | null
+  if (!q && !s) return null
+
+  const price = _num(q?.price) ?? _num(s?.['现价'])
+  if (price == null) return null
+
+  const name =
+    (q?.name != null && String(q.name).trim() !== '' ? String(q.name) : '') ||
+    (s?.['名称'] != null ? String(s['名称']).trim() : '') ||
+    ''
+  const code = String(q?.code ?? s?.['代码'] ?? stockCode.value)
+
+  return {
+    code,
+    name,
+    price,
+    change_pct: _num(q?.change_pct) ?? _num(s?.['涨跌幅']) ?? 0,
+    volume: _num(q?.volume) ?? _num(s?.['成交量']) ?? 0,
+    amount: _num(q?.amount) ?? _num(s?.['成交额']) ?? 0,
+    high: _num(q?.high) ?? _num(s?.['最高']) ?? 0,
+    low: _num(q?.low) ?? _num(s?.['最低']) ?? 0,
+    open: _num(q?.open) ?? _num(s?.['今开']) ?? 0,
+    prev_close: _num(q?.prev_close) ?? _num(s?.['昨收']) ?? 0,
+  }
+})
 
 const levels = [
   { value: '1min' as LevelOption, label: '1分' },
@@ -197,13 +337,15 @@ const levels = [
 ]
 
 const changeClass = computed(() => {
-  if (!quote.value) return ''
-  return quote.value.change_pct > 0 ? 'price-up' : quote.value.change_pct < 0 ? 'price-down' : 'price-flat'
+  const hq = headerQuote.value
+  if (!hq) return ''
+  return hq.change_pct > 0 ? 'price-up' : hq.change_pct < 0 ? 'price-down' : 'price-flat'
 })
 
 const changeText = computed(() => {
-  if (!quote.value) return ''
-  const pct = quote.value.change_pct
+  const hq = headerQuote.value
+  if (!hq) return ''
+  const pct = hq.change_pct
   return `${pct > 0 ? '+' : ''}${pct?.toFixed(2) || 0}%`
 })
 
@@ -214,16 +356,98 @@ const trendClass = computed(() => {
   return 'trend-side'
 })
 
+type InfoRow = { key: string; label: string; value: string; valueClass?: string }
+
+function fmtRatio(v?: number): string {
+  if (v == null || Number.isNaN(v) || v === 0) return '—'
+  return v.toFixed(2)
+}
+
+function fmtAmount(v?: number): string {
+  if (v == null || Number.isNaN(v) || v === 0) return '—'
+  if (v >= 1e8) return (v / 1e8).toFixed(2) + ' 亿'
+  if (v >= 1e4) return (v / 1e4).toFixed(2) + ' 万'
+  return v.toFixed(0)
+}
+
+const infoPanelRows = computed((): InfoRow[] => {
+  const s = stockInfo.value
+  if (!s) return []
+  const rows: InfoRow[] = []
+  const push = (
+    key: string,
+    label: string,
+    value: string,
+    valueClass?: string
+  ) => {
+    if (value !== '—') rows.push({ key, label, value, valueClass })
+  }
+  const chg = (s as any).涨跌额
+  let chgClass: string | undefined
+  if (chg != null && !Number.isNaN(chg)) {
+    if (chg > 0) chgClass = 'price-up'
+    else if (chg < 0) chgClass = 'price-down'
+  }
+  push('pe', '市盈率', fmtRatio((s as any).市盈率))
+  push('pb', '市净率', fmtRatio((s as any).市净率))
+  if ((s as any).振幅 != null && !Number.isNaN((s as any).振幅) && (s as any).振幅 !== 0) {
+    push('amp', '振幅', `${(s as any).振幅.toFixed(2)}%`)
+  }
+  push('amt', '成交额', fmtAmount((s as any).成交额))
+  if (chg != null && !Number.isNaN(chg)) {
+    const t = `${chg > 0 ? '+' : ''}${chg.toFixed(2)}`
+    push('chg_amt', '涨跌额', t, chgClass)
+  }
+  push('prev', '昨收', (s as any).昨收 != null && !Number.isNaN((s as any).昨收) && (s as any).昨收 !== 0 ? (s as any).昨收.toFixed(2) : '—')
+  return rows
+})
+
+const depthAsks = computed(() => extras.value?.depth?.asks ?? [])
+const depthBids = computed(() => extras.value?.depth?.bids ?? [])
+const hasDepth = computed(() => {
+  const d = extras.value?.depth
+  if (!d) return false
+  const ok = (rows: { price: number; volume: number }[]) =>
+    rows.some(r => r.price > 0 || r.volume > 0)
+  return ok(d.asks) || ok(d.bids)
+})
+
+/** 与顶部「行业」主标题去重，避免列表里再显示一行行业 */
+const boardHighlightRows = computed(() => {
+  const list = extras.value?.boards?.highlights ?? []
+  return list.filter(h => h.label !== '行业' && !/^行业/.test(h.label))
+})
+
+function fmtDepthPrice(p: number) {
+  if (p == null || Number.isNaN(p) || p <= 0) return '—'
+  return p.toFixed(2)
+}
+
+function fmtDepthVol(v: number) {
+  if (v == null || Number.isNaN(v) || v <= 0) return '—'
+  if (v >= 1e8) return (v / 1e8).toFixed(2) + '亿'
+  if (v >= 1e4) return (v / 1e4).toFixed(2) + '万'
+  return String(Math.round(v))
+}
+
 async function loadData() {
   const code = stockCode.value
   if (!code) return
   await store.loadAll(code, currentLevel.value)
 
-  // fetch quote
-  try {
-    const res = await stockApi.quote(code)
-    quote.value = res.data
-  } catch {}
+  const settled = await Promise.allSettled([
+    stockApi.quote(code),
+    stockApi.info(code),
+    stockApi.extras(code, 8),
+  ])
+  if (settled[0].status === 'fulfilled') quote.value = settled[0].value.data as Quote
+  else quote.value = null
+  if (settled[1].status === 'fulfilled') {
+    const inf = settled[1].value.data.info
+    stockInfo.value = inf && Object.keys(inf).length ? inf : null
+  } else stockInfo.value = null
+  if (settled[2].status === 'fulfilled') extras.value = settled[2].value.data
+  else extras.value = null
 }
 
 async function changeLevel(level: LevelOption) {
@@ -289,15 +513,145 @@ watch(() => route.params.code, loadData)
 
 .main-grid {
   display: grid;
-  grid-template-columns: 240px 1fr 280px;
+  grid-template-columns: 240px minmax(0, 1fr) 272px 280px;
   gap: 16px;
   padding: 16px 24px;
-  max-width: 1600px;
+  max-width: 1760px;
   margin: 0 auto;
   min-height: calc(100vh - 56px);
 }
 
-.sidebar, .sidebar-right { display: flex; flex-direction: column; gap: 12px; }
+.sidebar, .sidebar-right, .chart-rail { display: flex; flex-direction: column; gap: 12px; }
+
+.chart-rail {
+  min-width: 0;
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.chart-rail::-webkit-scrollbar { width: 5px; }
+.chart-rail::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.rail-card { padding: 12px 14px; }
+.rail-card-news { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.rail-empty {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.rail-hint { margin: 4px 0 0; font-size: 0.72rem; color: var(--text-secondary); }
+
+.depth-wrap { margin-top: 4px; }
+.depth-head {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr 1fr;
+  gap: 4px;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.dh-p, .dh-v { text-align: right; }
+.depth-row {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr 1fr;
+  gap: 4px;
+  align-items: center;
+  font-size: 0.78rem;
+  padding: 3px 0;
+}
+.depth-lab { color: var(--text-muted); font-size: 0.72rem; }
+.depth-price { text-align: right; font-weight: 600; }
+.depth-vol { text-align: right; font-size: 0.72rem; color: var(--text-secondary); }
+.depth-sell .depth-price { color: var(--accent-green); }
+.depth-buy .depth-price { color: var(--accent-red); }
+.depth-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+  opacity: 0.85;
+}
+
+.sector-main {
+  margin-top: 6px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--accent-blue);
+  line-height: 1.35;
+}
+.board-highlights {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.board-highlights li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.board-highlights li:last-child { border-bottom: none; padding-bottom: 0; }
+.bh-lab { font-size: 0.65rem; color: var(--text-muted); }
+.bh-val { font-size: 0.74rem; color: var(--text-secondary); word-break: break-all; }
+
+.news-rail-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 120px;
+  max-height: 320px;
+  padding-right: 2px;
+}
+.news-rail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.news-rail-item:hover:not(.news-rail-item--nolink) {
+  border-color: var(--accent-blue);
+  background: var(--bg-hover);
+}
+.news-rail-item--nolink {
+  cursor: default;
+  opacity: 0.85;
+}
+.news-rail-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.news-rail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+.news-rail-src {
+  color: var(--accent-blue);
+  font-weight: 600;
+}
 
 .stock-info-card { padding: 16px; }
 .stock-header {
@@ -365,6 +719,58 @@ watch(() => route.params.code, loadData)
 .chart-actions { margin-left: auto; }
 .sub-chart { height: 100px; }
 
+.company-info {
+  padding: 12px 14px;
+  flex-shrink: 0;
+}
+.company-info-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.company-info-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.company-info-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 55%;
+}
+.company-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px 14px;
+}
+.company-info-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.ci-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+.ci-value {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+@media (max-width: 1320px) {
+  .main-grid { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .chart-rail { display: none; }
+}
 @media (max-width: 1200px) {
   .main-grid { grid-template-columns: 200px 1fr; }
   .sidebar-right { display: none; }
