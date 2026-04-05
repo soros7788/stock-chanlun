@@ -33,8 +33,10 @@ class FenxingDetector:
     def _process_inclusion(self):
         """
         处理包含关系（单次遍历，缠论规则）：
-        - 上升趋势中：取高高（合并K线取最高高点和最低高点）
-        - 下降趋势中：取低低（合并K线取最高高点和最低低点）
+        - 两K线包含：prev 和 cur 任一完全包含另一根
+        - 合并方向由两根K线的相对位置决定（不是由单根自身阴阳决定）：
+            如果 prev 的最高点 ≤ cur 的最低点 → 向上关系 → 取高高（保留最高高点，合并高低点取高）
+            否则（prev 的最低点 ≥ cur 的最高点）→ 向下关系 → 取低低（保留最低低点，合并高低点取低）
 
         包含判断：
         - prev 包含 cur: prev.low <= cur.low AND prev.high >= cur.high
@@ -44,71 +46,94 @@ class FenxingDetector:
         result = [rows[0]]
 
         for i in range(1, len(rows)):
-            cur = rows[i]
+            cur  = rows[i]
             prev = result[-1]
 
             # prev 包含 cur
             if prev["low"] <= cur["low"] and prev["high"] >= cur["high"]:
-                direction = "up" if prev["close"] >= prev["open"] else "down"
-                result[-1] = {
-                    "date": prev["date"],
-                    "open": prev["open"],
-                    "high": max(prev["high"], cur["high"]),
-                    "low": prev["low"] if direction == "up" else min(prev["low"], cur["low"]),
-                    "close": cur["close"],
-                    "volume": prev.get("volume", 0) + cur.get("volume", 0),
-                }
+                if prev["high"] <= cur["low"]:
+                    # 向上关系：prev 在 cur 下方 → 取高高
+                    result[-1] = {
+                        "date": prev["date"],
+                        "open":  prev["open"],
+                        "high":  max(prev["high"], cur["high"]),
+                        "low":   max(prev["low"],  cur["low"]),
+                        "close": cur["close"],
+                        "volume": prev.get("volume", 0) + cur.get("volume", 0),
+                    }
+                else:
+                    # 向下关系：prev 在 cur 上方 → 取低低
+                    result[-1] = {
+                        "date": prev["date"],
+                        "open":  prev["open"],
+                        "high":  max(prev["high"], cur["high"]),
+                        "low":   min(prev["low"],  cur["low"]),
+                        "close": cur["close"],
+                        "volume": prev.get("volume", 0) + cur.get("volume", 0),
+                    }
             # cur 包含 prev
             elif cur["low"] <= prev["low"] and cur["high"] >= prev["high"]:
-                direction = "up" if prev["close"] >= prev["open"] else "down"
-                result[-1] = {
-                    "date": cur["date"],
-                    "open": prev["open"],
-                    "high": max(prev["high"], cur["high"]),
-                    "low": cur["low"] if direction == "up" else min(prev["low"], cur["low"]),
-                    "close": cur["close"],
-                    "volume": prev.get("volume", 0) + cur.get("volume", 0),
-                }
+                if prev["high"] <= cur["low"]:
+                    # 向上关系
+                    result[-1] = {
+                        "date": cur["date"],
+                        "open":  prev["open"],
+                        "high":  max(prev["high"], cur["high"]),
+                        "low":   max(prev["low"],  cur["low"]),
+                        "close": cur["close"],
+                        "volume": prev.get("volume", 0) + cur.get("volume", 0),
+                    }
+                else:
+                    # 向下关系
+                    result[-1] = {
+                        "date": cur["date"],
+                        "open":  prev["open"],
+                        "high":  max(prev["high"], cur["high"]),
+                        "low":   min(prev["low"],  cur["low"]),
+                        "close": cur["close"],
+                        "volume": prev.get("volume", 0) + cur.get("volume", 0),
+                    }
             else:
                 result.append(cur)
 
         self.klines = pd.DataFrame(result).reset_index(drop=True)
 
     def detect(self) -> list[Fenxing]:
-        """识别所有分型"""
+        """
+        识别所有分型（标准五笔窗口）：
+        顶分型 = 中间K线高点 > 左1 且 > 右1，且低点 > 左1 且 > 右1
+        底分型 = 中间K线高点 < 左1 且 < 右1，且低点 < 左1 且 < 右1
+        窗口取前后各1根（共3根），严格对应缠论标准定义。
+        """
         df = self.klines
         fenxings = []
 
-        for i in range(2, len(df)):
-            seg = df.iloc[i-2:i+3]  # 取前后各2根，共5根
-            if len(seg) < 5:
-                continue
-
-            # 中间是 seg.iloc[2]（第3根）
-            middle = seg.iloc[2]
-            left1, right1 = seg.iloc[1], seg.iloc[3]
+        for i in range(1, len(df) - 1):
+            prev = df.iloc[i - 1]
+            middle = df.iloc[i]
+            next_ = df.iloc[i + 1]
 
             mid_h, mid_l = middle['high'], middle['low']
 
-            # 顶分型
-            if (mid_h > left1['high'] and mid_h > right1['high'] and
-                    mid_l > left1['low'] and mid_l > right1['low']):
+            # 顶分型：中间K线"高"最高、"低"也最高（∧形）
+            if (mid_h > prev['high'] and mid_h > next_['high'] and
+                    mid_l > prev['low'] and mid_l > next_['low']):
                 fenxings.append(Fenxing(
                     date=middle['date'],
                     type="top",
                     high=float(mid_h),
                     low=float(mid_l),
-                    index=i-2
+                    index=i
                 ))
-            # 底分型
-            elif (mid_h < left1['high'] and mid_h < right1['high'] and
-                  mid_l < left1['low'] and mid_l < right1['low']):
+            # 底分型：中间K线"高"最低、"低"也最低（∨形）
+            elif (mid_h < prev['high'] and mid_h < next_['high'] and
+                  mid_l < prev['low'] and mid_l < next_['low']):
                 fenxings.append(Fenxing(
                     date=middle['date'],
                     type="bottom",
                     high=float(mid_h),
                     low=float(mid_l),
-                    index=i-2
+                    index=i
                 ))
 
         return fenxings

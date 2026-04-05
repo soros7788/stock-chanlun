@@ -92,8 +92,11 @@ class SegmentDetector:
 
     def detect_zhongshus(self, segments: list[XiangSegment]) -> list[Zhongshu]:
         """
-        检测中枢:
-        3个连续同级别线段的重叠区域构成中枢
+        检测中枢（滑动窗口算法）：
+        遍历线段序列，每取得连续3段计算重叠区间：
+        - 有重叠 → 构成中枢，尝试向后延伸（后续线段若与之重叠则并入）
+        - 无重叠 → 跳过，继续寻找下一组
+        相邻中枢之间必然间隔至少3个线段，不会重复。
         """
         if len(segments) < 3:
             return []
@@ -104,22 +107,39 @@ class SegmentDetector:
         while i <= len(segments) - 3:
             group = segments[i:i + 3]
 
-            # 计算重叠区间
+            # 计算三段重叠区间
             range_high = min(s.high for s in group)
             range_low = max(s.low for s in group)
 
             if range_high > range_low:
-                # 有重叠，构成中枢
+                # 重叠 → 形成中枢，尝试向后延伸
+                cur_start = group[0].start
+                cur_end = group[-1].end
+                xiang_ids = [s.id for s in group]
+                extend_idx = i + 3
+
+                while extend_idx < len(segments):
+                    nxt = segments[extend_idx]
+                    # 新段与当前中枢重叠 → 并入
+                    if nxt.high > range_low and nxt.low < range_high:
+                        range_high = max(range_high, nxt.high)
+                        range_low = min(range_low, nxt.low)
+                        cur_end = nxt.end
+                        xiang_ids.append(nxt.id)
+                        extend_idx += 1
+                    else:
+                        break
+
                 zhongshus.append(Zhongshu(
                     id=f"zs_{len(zhongshus)+1}",
-                    start=group[0].start,
-                    end=group[-1].end,
+                    start=cur_start,
+                    end=cur_end,
                     range_high=float(range_high),
                     range_low=float(range_low),
-                    xiang_ids=[s.id for s in group],
+                    xiang_ids=xiang_ids,
                     level=group[0].level
                 ))
-                i += 3
+                i = extend_idx  # 跳到中枢结束后的第一个线段
             else:
                 i += 1
 
