@@ -21,7 +21,7 @@ function buildOption() {
   const { dif, dea } = calcMACD(closes)
   const bar = dif.map((v, i) => (v - dea[i]) * 2)
   const dates = props.klines.map(k => k.date.slice(0, 10))
-  const s = props.zoomStart ?? 70
+  const s = props.zoomStart ?? 0
   const e = props.zoomEnd ?? 100
 
   return {

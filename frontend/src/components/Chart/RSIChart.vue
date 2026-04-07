@@ -44,7 +44,7 @@ function buildOption() {
   const closes = props.klines.map(k => k.close)
   const rsi = calcRSI(closes)
   const dates = props.klines.map(k => k.date.slice(0, 10))
-  const s = props.zoomStart ?? 70
+  const s = props.zoomStart ?? 0
   const e = props.zoomEnd ?? 100
 
   return {

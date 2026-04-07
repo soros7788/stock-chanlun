@@ -25,7 +25,7 @@ function buildOption() {
     const prev = props.klines[i - 1].close
     return k.close >= prev ? COLOR_UP : COLOR_DOWN
   })
-  const s = props.zoomStart ?? 70
+  const s = props.zoomStart ?? 0
   const e = props.zoomEnd ?? 100
 
   return {
