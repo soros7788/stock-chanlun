@@ -53,6 +53,7 @@ from services.akshare_service import (
     get_daily_hot_stocks, warm_hot_cache,
     get_market_overview_bundle, get_stock_news,
     get_stock_depth_em, get_stock_boards_em, get_stock_symbol_news_em,
+    get_board_constituents_em,
 )
 
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
@@ -100,7 +101,7 @@ def _run_analysis(code: str, level: str, kline_limit: int = 500) -> ChanlunAnaly
 
     if df.empty or len(df) < 20:
         raise HTTPException(status_code=404,
-                            detail=f"K线数据不足: {code} {level}")
+                            detail=f"{code} {level}级别K线数据不足（仅{len(df) if not df.empty else 0}根），请换日线/30分钟级别尝试")
 
     if len(df) > kline_limit:
         df = df.tail(kline_limit).reset_index(drop=True)
@@ -248,6 +249,16 @@ def market_overview():
 def news(limit: int = Query(10, ge=1, le=30)):
     """财经新闻列表"""
     return {"items": get_stock_news(limit)}
+
+
+@app.get("/api/sector/{name}/stocks", tags=["数据"])
+def sector_stocks(name: str):
+    """板块成分股（行业/概念）：返回按涨跌幅降序排列的成分股列表"""
+    try:
+        return get_board_constituents_em(name)
+    except Exception as e:
+        print(f"[板块] 「{name}」获取失败: {e}")
+        return {"sector_name": name, "board_type": None, "stocks": [], "total": 0}
 
 
 @app.get("/api/stocks/{code}/info", tags=["数据"])

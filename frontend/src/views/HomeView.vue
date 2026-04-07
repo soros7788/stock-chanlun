@@ -142,6 +142,7 @@
                   :key="'hb-' + idx"
                   class="hot-board-cell"
                   :class="sectorPillClass(b.change_pct)"
+                  @click="goSector(b.name)"
                 >
                   <span class="hb-name">{{ b.name }}</span>
                   <span class="hb-pct mono"
@@ -166,6 +167,7 @@
                     class="sector-pill"
                     :class="sectorPillClass(s.change_pct)"
                     :title="`${s.name} ${s.change_pct >= 0 ? '+' : ''}${s.change_pct.toFixed(2)}%`"
+                    @click="goSector(s.name)"
                   >
                     <span class="pill-name">{{ s.name }}</span>
                     <span class="pill-pct mono"
@@ -185,7 +187,7 @@
                   领涨
                 </div>
                 <ul class="sectors-list">
-                  <li v-for="(s, i) in sectorTopList" :key="'t-' + i" class="sector-item">
+                  <li v-for="(s, i) in sectorTopList" :key="'t-' + i" class="sector-item" @click="goSector(s.name)">
                     <span class="si-name">{{ s.name }}</span>
                     <span class="si-pct mono price-up">+{{ s.change_pct.toFixed(2) }}%</span>
                   </li>
@@ -199,7 +201,7 @@
                   领跌
                 </div>
                 <ul class="sectors-list">
-                  <li v-for="(s, i) in sectorBottomList" :key="'b-' + i" class="sector-item">
+                  <li v-for="(s, i) in sectorBottomList" :key="'b-' + i" class="sector-item" @click="goSector(s.name)">
                     <span class="si-name">{{ s.name }}</span>
                     <span class="si-pct mono"
                       :class="s.change_pct >= 0 ? 'price-up' : 'price-down'"
@@ -353,6 +355,10 @@ function selectHistory(q: string) {
 
 function goToStock(code: string) {
   router.push(`/stock/${code}`)
+}
+
+function goSector(name: string) {
+  router.push(`/sector/${encodeURIComponent(name)}`)
 }
 
 // ── 大盘数据 ──
@@ -728,6 +734,7 @@ onMounted(async () => {
   transition: opacity 0.15s;
 }
 .sector-pill:hover { opacity: 0.75; }
+.sector-pill, .sector-item, .hot-board-cell { cursor: pointer; }
 .pill-up { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.22); }
 .pill-up .pill-name, .pill-up .pill-pct { color: var(--accent-red); }
 .pill-down { background: rgba(34,197,94,0.10); border-color: rgba(34,197,94,0.22); }

@@ -749,6 +749,94 @@ def get_industry_board_movers(limit_each: int = 5) -> dict:
     return {"top": top, "bottom": bottom}
 
 
+def _finite_num(v, default: float = 0.0) -> float:
+    try:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return default
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_em_board_cons_df(df: pd.DataFrame | None) -> list[dict]:
+    """东方财富行业/概念成分股 DataFrame → 统一结构（列名：序号、代码、名称、最新价、涨跌幅…）"""
+    if df is None or df.empty:
+        return []
+    rows: list[dict] = []
+    for _, r in df.iterrows():
+        raw = str(r.get("代码", "") or "").strip()
+        digits = re.sub(r"\D", "", raw)
+        if not digits:
+            continue
+        code = digits.zfill(6)[-6:]
+        name = str(r.get("名称", "") or "").strip()
+        if not name:
+            continue
+        rows.append({
+            "code": code,
+            "name": name,
+            "price": round(_finite_num(r.get("最新价")), 4),
+            "change_pct": round(_finite_num(r.get("涨跌幅")), 4),
+            "volume": round(_finite_num(r.get("成交量")), 2),
+            "amount": round(_finite_num(r.get("成交额")), 2),
+            "turnover_pct": round(_finite_num(r.get("换手率")), 4),
+            "pe_ttm": round(_finite_num(r.get("市盈率-动态")), 4),
+            "pb": round(_finite_num(r.get("市净率")), 4),
+        })
+    return rows
+
+
+def get_board_constituents_em(board_name: str) -> dict:
+    """
+    板块成分股（东方财富）：先行业板块 stock_board_industry_cons_em，
+    无数据再试概念板块 stock_board_concept_cons_em。
+    成分股按涨跌幅降序排列。
+    """
+    name = (board_name or "").strip()
+    if not name:
+        return {"sector_name": "", "board_type": None, "stocks": [], "total": 0}
+
+    cache_key = f"board_cons:{name}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    import akshare as ak
+
+    stocks: list[dict] = []
+    board_type: str | None = None
+
+    try:
+        df = ak.stock_board_industry_cons_em(symbol=name)
+        stocks = _parse_em_board_cons_df(df)
+        if stocks:
+            board_type = "industry"
+    except Exception as e:
+        print(f"[板块成分] 行业「{name}」失败: {e}")
+
+    if not stocks:
+        try:
+            df = ak.stock_board_concept_cons_em(symbol=name)
+            stocks = _parse_em_board_cons_df(df)
+            if stocks:
+                board_type = "concept"
+        except Exception as e:
+            print(f"[板块成分] 概念「{name}」失败: {e}")
+
+    stocks.sort(key=lambda x: x["change_pct"], reverse=True)
+    for i, s in enumerate(stocks, start=1):
+        s["rank"] = i
+
+    out = {
+        "sector_name": name,
+        "board_type": board_type,
+        "stocks": stocks,
+        "total": len(stocks),
+    }
+    _cache_set(cache_key, out, ttl=90)
+    return out
+
+
 def get_market_overview_bundle() -> dict:
     """聚合：主要指数 + 涨跌家数 + 全部行业板块（供 /api/market/overview）"""
     indices = {

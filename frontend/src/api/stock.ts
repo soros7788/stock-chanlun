@@ -88,6 +88,28 @@ export interface HotStock {
   volume?: number
 }
 
+/** 板块内单只成分股 */
+export interface SectorStock {
+  rank: number
+  code: string
+  name: string
+  price: number
+  change_pct: number
+  volume: number
+  amount: number
+  turnover_pct: number
+  pe_ttm: number
+  pb: number
+}
+
+/** 板块详情响应 */
+export interface SectorDetail {
+  sector_name: string
+  board_type: 'industry' | 'concept' | null
+  stocks: SectorStock[]
+  total: number
+}
+
 /** 首页大盘概览：主要指数一行 */
 export interface MarketOverviewIndex {
   code: string
@@ -246,6 +268,10 @@ export const stockApi = {
 
   news(limit = 10) {
     return api.get<{ items: NewsItem[] }>('/news', { params: { limit }, timeout: 20000 })
+  },
+
+  sectorStocks(name: string) {
+    return api.get<SectorDetail>(`/sector/${encodeURIComponent(name)}/stocks`, { timeout: 90000 })
   },
 
   info(code: string) {

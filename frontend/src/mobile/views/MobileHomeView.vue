@@ -67,6 +67,7 @@
             :key="'hs-' + idx"
             class="sector-chip"
             :class="s.change_pct >= 0 ? 'chip-up' : 'chip-down'"
+            @click="go(`/m/sector/${encodeURIComponent(s.name)}`)"
           >
             <span class="chip-name">{{ s.name }}</span>
             <span class="chip-pct mono"
