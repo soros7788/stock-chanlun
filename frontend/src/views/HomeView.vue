@@ -11,6 +11,9 @@
         </div>
         <div class="search-box">
           <div class="search-wrap">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
             <input
               v-model="keyword"
               @keydown.enter="search"
@@ -19,6 +22,11 @@
               placeholder="输入股票代码或名称..."
               class="search-input"
             />
+            <button v-if="keyword" class="search-clear" @click="keyword = ''; results = []" aria-label="清除">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M18 6 6 18M6 6l12 12"/>
+              </svg>
+            </button>
             <div v-if="showHistory && searchHistory.length > 0 && !results.length" class="search-history">
               <div class="history-head">
                 <span>最近搜索</span>
@@ -32,8 +40,12 @@
               >{{ h }}</div>
             </div>
           </div>
-          <button class="btn btn-primary" @click="search">搜索</button>
+          <button class="btn btn-primary search-btn" @click="search" :disabled="searching || !keyword.trim()">
+            <span v-if="searching">搜索中...</span>
+            <span v-else>搜索</span>
+          </button>
         </div>
+        <div v-if="searchError" class="search-error-inline">{{ searchError }}</div>
       </div>
     </nav>
 
@@ -483,20 +495,41 @@ onMounted(async () => {
   max-width: 380px;
   flex: 1;
   position: relative;
+  align-items: center;
 }
-.search-wrap { position: relative; flex: 1; }
+.search-wrap { position: relative; flex: 1; display: flex; align-items: center; gap: 6px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; transition: border-color 0.15s; }
+.search-wrap:focus-within { border-color: var(--accent-blue); }
+.search-icon { flex-shrink: 0; color: var(--text-muted); }
 .search-input {
   flex: 1;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 7px 14px;
+  background: transparent;
+  border: none;
+  outline: none;
   color: var(--text-primary);
   font-size: 0.875rem;
-  outline: none;
-  width: 100%;
+  padding: 7px 0;
 }
 .search-input:focus { border-color: var(--accent-blue); }
+
+.search-clear {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: color 0.15s;
+}
+.search-clear:hover { color: var(--text-primary); }
+
+.search-btn { flex-shrink: 0; min-width: 68px; }
+.search-btn:disabled { opacity: 0.6; cursor: default; filter: none; }
+
+.search-error-inline { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 200; background: var(--bg-card); border: 1px solid var(--accent-red); border-radius: 8px; padding: 6px 12px; font-size: 0.8rem; color: var(--accent-red); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 
 .search-history {
   position: absolute;

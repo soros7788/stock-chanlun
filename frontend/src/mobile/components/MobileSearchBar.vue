@@ -13,10 +13,16 @@
           autocomplete="off"
           autocorrect="off"
           spellcheck="false"
+          @input="onInput"
         />
         <button v-if="keyword" class="search-clear" @click="keyword = ''" aria-label="清除">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+        <button class="search-submit" @click="doSearch" :disabled="!keyword.trim()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>
         </button>
       </div>
@@ -74,6 +80,15 @@ const searched = ref(false)
 const searching = ref(false)
 const history = ref<string[]>(JSON.parse(localStorage.getItem('m_search_history') || '[]'))
 const showHistory = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+function onInput() {
+  results.value = []
+  searched.value = false
+  showHistory.value = true
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { showHistory.value = false }, 300)
+}
 
 async function doSearch() {
   if (!keyword.value.trim()) return
@@ -193,6 +208,26 @@ function selectHistory(q: string) {
 
 .search-clear:hover {
   color: var(--text-primary);
+}
+
+.search-submit {
+  background: var(--accent-blue);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.search-submit:hover { background: #38bdf8; }
+.search-submit:disabled {
+  background: var(--border);
+  color: var(--text-muted);
+  cursor: default;
 }
 
 /* 搜索结果 */
