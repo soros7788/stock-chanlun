@@ -57,11 +57,11 @@ export const useChanlunStore = defineStore('chanlun', () => {
   const chanlunUpdatedAt = ref<string | null>(null)
   const aiUpdatedAt = ref<string | null>(null)
 
-  async function fetchKline(code: string, level: LevelOption = 'daily') {
+  async function fetchKline(code: string, level: LevelOption = 'daily', startDate?: string, endDate?: string) {
     loadingKline.value = true
     errorKline.value = null
     try {
-      const res = await stockApi.kline(code, level)
+      const res = await stockApi.kline(code, level, 500, startDate, endDate)
       klines.value = res.data.klines || []
       klineUpdatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     } catch (e: any) {
@@ -99,10 +99,10 @@ export const useChanlunStore = defineStore('chanlun', () => {
     }
   }
 
-  async function loadAll(code: string, level: LevelOption = 'daily') {
+  async function loadAll(code: string, level: LevelOption = 'daily', startDate?: string, endDate?: string) {
     currentLevel.value = level
     await Promise.all([
-      fetchKline(code, level),
+      fetchKline(code, level, startDate, endDate),
       fetchChanlun(code, level),
       fetchAISignal(code, level),
     ])
@@ -128,6 +128,7 @@ export const useChanlunStore = defineStore('chanlun', () => {
     loadingKline, loadingChanlun, loadingAI,
     errorKline, errorChanlun, errorAI,
     currentLevel, aiModel, indicators,
+    klineUpdatedAt, chanlunUpdatedAt, aiUpdatedAt,
     fetchKline, fetchChanlun, fetchAISignal, loadAll, setAiModel,
     toggleIndicator, setIndicator
   }

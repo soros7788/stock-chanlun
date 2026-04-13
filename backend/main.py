@@ -25,7 +25,10 @@ import math
 import os
 import json
 import uuid
+import asyncio
 from datetime import datetime, timezone
+
+import httpx
 
 # 加载 .env 环境变量
 try:
@@ -33,6 +36,7 @@ try:
     load_dotenv()
 except ImportError:
     pass  # 未安装 python-dotenv 时忽略
+import sys
 from pathlib import Path
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -327,13 +331,21 @@ def realtime_quote(code: str):
 def stock_kline(
     code: str,
     level: str = Query("daily", pattern="^(1min|5min|15min|30min|60min|daily|weekly|monthly)$"),
-    limit: int = Query(500, le=2000)
+    limit: int = Query(500, le=2000),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD")
 ):
     """获取K线数据"""
     period = _level_to_period(level)
     df = get_kline_hist(code, period=period, adjust="qfq")
     if df.empty:
         return {"klines": [], "total": 0}
+
+    # 时间范围筛选
+    if start_date:
+        df = df[df['date'] >= pd.Timestamp(start_date)]
+    if end_date:
+        df = df[df['date'] <= pd.Timestamp(end_date) + pd.Timedelta(days=1)]
 
     df = df.tail(limit).reset_index(drop=True)
 
@@ -736,6 +748,232 @@ def update_settings(model: str = Query(..., description="AI 模型 deepseek / ge
     s["ai_model"] = model
     _save_settings(s)
     return {"ai_model": model, "ok": True}
+
+
+# ─── AI 诊股对话 API（流式 SSE）────────────────────────────────────────────────
+
+class _ChatSession:
+    """轻量对话会话：维护最近 N 轮历史"""
+
+    def __init__(self, max_turns: int = 10):
+        self.messages: list[dict] = []
+        self.max_turns = max_turns
+
+    def add(self, role: str, content: str):
+        self.messages.append({"role": role, "content": content})
+        if len(self.messages) > self.max_turns * 2:
+            self.messages = self.messages[-self.max_turns * 2:]
+
+    def history(self) -> list[dict]:
+        return self.messages
+
+
+# 内存中会话（进程重启后清空）
+_chat_sessions: dict[str, _ChatSession] = {}
+
+
+def _get_or_create_session(session_id: str) -> _ChatSession:
+    if session_id not in _chat_sessions:
+        _chat_sessions[session_id] = _ChatSession(max_turns=10)
+    return _chat_sessions[session_id]
+
+
+@app.get("/api/ai/diagnosis", tags=["AI诊股"])
+async def ai_diagnosis(
+    code: str = Query(..., description="股票代码"),
+    question: str = Query(..., description="用户问题"),
+    session_id: str = Query("default", description="会话ID"),
+    model: str = Query("deepseek", description="AI模型"),
+):
+    """
+    AI 诊股对话接口（流式 SSE）。
+    用户描述股票问题，AI 结合缠论数据给出诊断。
+    """
+    sys.stdout.write(f"[AI诊断] GET 请求进入，code={code}, question={question[:20]}, session={session_id}\n")
+    sys.stdout.flush()
+    from ai.llm_client import get_llm_client, set_llm_model
+    from chanlun.engine import ChanlunEngine
+
+    # 加载/切换模型
+    if model not in ("deepseek", "gemini"):
+        model = "deepseek"
+
+    async def event_stream():
+        sys.stdout.write(f"[AI诊断] event_stream 启动，session={session_id}\n")
+        sys.stdout.flush()
+        try:
+            sys.stdout.write(f"[AI诊断] 准备加载 LLM，model={model}\n")
+            sys.stdout.flush()
+            llm = get_llm_client(model)
+            sys.stdout.write(f"[AI诊断] LLM 加载成功\n")
+            sys.stdout.flush()
+            sym, exchange = normalize_stock_code(code)
+
+            # 尝试获取股票名称
+            stock_name = ""
+            try:
+                info = get_stock_info(sym)
+                stock_name = str(info.get("名称", sym))
+            except Exception:
+                stock_name = sym
+
+            # 尝试获取缠论分析数据
+            analysis_context = ""
+            try:
+                result = _run_analysis(sym, "daily")
+                current_price = float(result.klines[-1].close) if result.klines else 0.0
+
+                # 构建分析上下文
+                recent_kl = result.klines[-20:] if len(result.klines) > 20 else result.klines
+                kl_lines = "\n".join(
+                    f"{k.date[:10]}  开:{k.open:.2f} 高:{k.high:.2f} 低:{k.low:.2f} 收:{k.close:.2f}"
+                    for k in recent_kl
+                )
+                bi_lines = "\n".join(
+                    f"[{b.start[:10]}] {b.direction} 高:{b.high:.2f} 低:{b.low:.2f}"
+                    for b in result.bis[-5:]
+                )
+                zs_lines = "\n".join(
+                    f"[{z.start[:10]}] 中枢 高:{z.range_high:.2f} 低:{z.range_low:.2f}"
+                    for z in result.zhongshus[-3:]
+                )
+                sig_lines = "\n".join(
+                    f"{s.datetime[:10]} {s.type}@{s.price:.2f} 置信:{s.confidence}"
+                    for s in result.signals[-5:]
+                )
+
+                analysis_context = f"""
+【{stock_name}({sym}) 日线数据】
+最近K线：\n{kl_lines}
+笔：\n{bi_lines or '暂无'}
+中枢：\n{zs_lines or '暂无'}
+买卖点：\n{sig_lines or '暂无'}
+趋势：{result.trend}"""
+            except Exception as e:
+                analysis_context = f"[缠论数据获取失败: {e}]"
+
+            # 系统提示词
+            system_prompt = f"""你是专业的缠论技术分析助手，名称"缠师"。
+
+用户会向你询问股票诊断问题。请结合以下缠论数据，
+用通俗易懂的语言给出诊断建议，避免过于专业的术语堆砌。
+
+当前股票数据：
+{analysis_context}
+
+回答要求：
+1. 先确认用户问的股票，分析当前走势和位置
+2. 结合缠论关键点（笔、中枢、背驰、买卖点）
+3. 给出明确操作建议（买入/卖出/观望）
+4. 如需要，提示风险和止损位
+5. 保持友好专业的语气，像一个老练的分析师在聊天
+
+重要：如果没有股票数据，请直接说明并建议用户提供股票代码。"""
+
+            # 添加用户消息到历史
+            session = _get_or_create_session(session_id)
+            session.add("user", question)
+
+            # 构建消息列表
+            messages = [{"role": "system", "content": system_prompt}] + session.history()
+
+            # 流式调用 DeepSeek
+            full_text = ""
+            try:
+                if model.startswith("deepseek"):
+                    key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+                    if not key:
+                        yield f"data: {json.dumps({'error': 'DEEPSEEK_API_KEY 未设置，请在 .env 中配置'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    sys.stdout.write(f"[AI诊断] DeepSeek 流式调用开始，session={session_id}\n")
+                    sys.stdout.flush()
+                    # 使用 SSE 流式 API，禁用代理避免网络问题
+                    body = {
+                        "model": "deepseek-chat",
+                        "messages": messages,
+                        "temperature": 0.4,
+                        "stream": True,
+                    }
+                    async with httpx.AsyncClient(timeout=120.0) as client:
+                        async with client.stream(
+                            "POST",
+                            "https://api.deepseek.com/v1/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {key}",
+                                "Content-Type": "application/json",
+                            },
+                            json=body,
+                        ) as resp:
+                            sys.stdout.write(f"[AI诊断] DeepSeek 响应状态: {resp.status_code}\n")
+                            sys.stdout.flush()
+                            resp.raise_for_status()
+                            async for line in resp.aiter_lines():
+                                if not line.strip() or not line.startswith("data:"):
+                                    continue
+                                data = line[5:].strip()
+                                if data == "[DONE]":
+                                    break
+                                try:
+                                    chunk = json.loads(data)
+                                    content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                    if content:
+                                        full_text += content
+                                        yield f"data: {json.dumps({'token': content}, ensure_ascii=False)}\n\n"
+                                except json.JSONDecodeError:
+                                    continue
+                    sys.stdout.write(f"[AI诊断] DeepSeek 流式完成，回复长度: {len(full_text)}\n")
+                    sys.stdout.flush()
+
+                elif model.startswith("gemini"):
+                    key = os.environ.get("GEMINI_API_KEY", "").strip()
+                    if not key:
+                        yield f"data: {json.dumps({'error': 'GEMINI_API_KEY 未设置，请在 .env 中配置'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    # Gemini 非流式
+                    from ai.llm_client import LLMClient
+                    gemini_client = LLMClient(model=model)
+                    full_text = gemini_client.chat(
+                        prompt=question,
+                        system=system_prompt,
+                        temperature=0.4,
+                    )
+                    for char in full_text:
+                        yield f"data: {json.dumps({'token': char}, ensure_ascii=False)}\n\n"
+                        await asyncio.sleep(0.02)  # 打字机效果延迟
+
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+            # 保存助手回复到历史
+            session.add("assistant", full_text)
+
+            # 结束信号
+            yield f"data: {json.dumps({'done': True, 'full': full_text}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/ai/diagnosis", tags=["AI诊股"])
+async def ai_diagnosis_post(
+    code: str = Query(...),
+    question: str = Query(...),
+    session_id: str = Query("default"),
+    model: str = Query("deepseek"),
+):
+    """POST 版本的诊股接口（URL 编码问题少）"""
+    return await ai_diagnosis(code=code, question=question, session_id=session_id, model=model)
 
 
 # ─── 健康检查 ───────────────────────────────────────────────────────────────

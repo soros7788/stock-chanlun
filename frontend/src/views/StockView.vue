@@ -129,14 +129,53 @@
       <!-- Center: Chart -->
       <div class="chart-area">
         <div class="chart-header">
-          <div class="level-tabs chart-level-tabs">
-            <button
-              v-for="lv in levels"
-              :key="lv.value"
-              class="level-tab"
-              :class="{ active: currentLevel === lv.value }"
-              @click="changeLevel(lv.value)"
-            >{{ lv.label }}</button>
+          <div class="chart-header-left">
+            <div class="level-tabs chart-level-tabs">
+              <button
+                v-for="lv in levels"
+                :key="lv.value"
+                class="level-tab"
+                :class="{ active: currentLevel === lv.value }"
+                @click="changeLevel(lv.value)"
+              >{{ lv.label }}</button>
+            </div>
+            <!-- 时间筛选 -->
+            <div class="date-filter" :class="{ 'has-filter': startDate || endDate }">
+              <button class="date-filter-toggle" @click="toggleDatePanel" :class="{ active: startDate || endDate }">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="16" y1="2" x2="16" y2="6"/>
+                  <line x1="8" y1="2" x2="8" y2="6"/>
+                  <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                <span v-if="!startDate && !endDate">时间筛选</span>
+                <span v-else class="date-filter-active-text">{{ formatFilterText() }}</span>
+              </button>
+              <div v-if="showDatePanel" class="date-panel">
+                <div class="date-panel-row">
+                  <label class="date-panel-label">开始日期</label>
+                  <input
+                    type="date"
+                    v-model="startDate"
+                    :max="endDate || undefined"
+                    class="date-panel-input"
+                  />
+                </div>
+                <div class="date-panel-row">
+                  <label class="date-panel-label">结束日期</label>
+                  <input
+                    type="date"
+                    v-model="endDate"
+                    :min="startDate || undefined"
+                    class="date-panel-input"
+                  />
+                </div>
+                <div class="date-panel-actions">
+                  <button class="date-panel-reset" @click="resetDateFilter" v-if="startDate || endDate">清除</button>
+                  <button class="date-panel-apply" @click="applyDateFilter">应用</button>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="chart-actions">
             <IndicatorSelector />
@@ -261,6 +300,7 @@
 
       <!-- Right: AI Strategy + Notes -->
       <aside class="sidebar-right">
+        <AIChat :stock-code="stockCode" />
         <CommentSection :stock-code="stockCode" />
         <StrategyCard :signal="store.aiSignal" :updated-at="store.aiUpdatedAt" />
       </aside>
@@ -283,6 +323,7 @@ import SignalCard from '../components/Signal/SignalCard.vue'
 import StrategyCard from '../components/Signal/StrategyCard.vue'
 import IndicatorSelector from '../components/IndicatorSelector.vue'
 import CommentSection from '../components/Signal/CommentSection.vue'
+import AIChat from '../components/AIChat.vue'
 
 const route = useRoute()
 const store = useChanlunStore()
@@ -316,6 +357,44 @@ const quote = ref<Quote | null>(null)
 const stockInfo = ref<StockInfoFields | null>(null)
 const extras = ref<StockExtras | null>(null)
 const isWatching = ref(false)
+
+// 时间筛选
+function getOneYearAgo(): string {
+  const date = new Date()
+  date.setFullYear(date.getFullYear() - 1)
+  return date.toISOString().split('T')[0]
+}
+
+const startDate = ref(getOneYearAgo())
+const endDate = ref('')
+const showDatePanel = ref(false)
+
+function toggleDatePanel() {
+  showDatePanel.value = !showDatePanel.value
+}
+
+function formatFilterText() {
+  if (startDate.value && endDate.value) {
+    return `${startDate.value} ~ ${endDate.value}`
+  } else if (startDate.value) {
+    return `${startDate.value} 至今`
+  } else if (endDate.value) {
+    return `~ ${endDate.value}`
+  }
+  return '时间筛选'
+}
+
+function resetDateFilter() {
+  startDate.value = getOneYearAgo()
+  endDate.value = ''
+  showDatePanel.value = false
+  store.loadAll(stockCode.value, currentLevel.value)
+}
+
+function applyDateFilter() {
+  showDatePanel.value = false
+  store.loadAll(stockCode.value, currentLevel.value, startDate.value || undefined, endDate.value || undefined)
+}
 
 function _num(v: unknown): number | null {
   if (v == null || v === '') return null
@@ -465,7 +544,7 @@ function fmtDepthVol(v: number) {
 async function loadData() {
   const code = stockCode.value
   if (!code) return
-  await store.loadAll(code, currentLevel.value)
+  await store.loadAll(code, currentLevel.value, startDate.value || undefined, endDate.value || undefined)
 
   const settled = await Promise.allSettled([
     stockApi.quote(code),
@@ -603,17 +682,24 @@ watch(() => route.params.code, loadData)
   padding: 16px 24px;
   max-width: 1760px;
   margin: 0 auto;
-  min-height: calc(100vh - 56px);
+  height: calc(100vh - 56px);
+  overflow: hidden;
 }
 
-.sidebar, .sidebar-right, .chart-rail { display: flex; flex-direction: column; gap: 12px; }
+.sidebar, .chart-rail { display: flex; flex-direction: column; gap: 12px; }
 
 .sidebar-right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   min-width: 0;
-  max-height: calc(100vh - 72px);
+  height: calc(100vh - 88px);
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+  position: sticky;
+  top: 0;
+  align-self: start;
 }
 .sidebar-right::-webkit-scrollbar { width: 5px; }
 .sidebar-right::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -861,6 +947,137 @@ watch(() => route.params.code, loadData)
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+/* 时间筛选器样式 */
+.chart-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.date-filter {
+  position: relative;
+}
+
+.date-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.date-filter-toggle:hover {
+  border-color: var(--accent-blue);
+  color: var(--text-primary);
+}
+
+.date-filter-toggle.active {
+  background: rgba(14, 165, 233, 0.1);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.date-filter-active-text {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.date-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  min-width: 220px;
+}
+
+.date-panel-row {
+  margin-bottom: 12px;
+}
+
+.date-panel-row:last-of-type {
+  margin-bottom: 14px;
+}
+
+.date-panel-label {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.date-panel-input {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.date-panel-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.date-panel-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.date-panel-reset {
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.date-panel-reset:hover {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
+.date-panel-apply {
+  padding: 6px 14px;
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  border: none;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.date-panel-apply:hover {
+  filter: brightness(1.1);
 }
 
 @media (max-width: 1320px) {

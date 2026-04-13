@@ -205,17 +205,10 @@ function formatTime(iso: string): string {
   try {
     const d = new Date(iso)
     if (isNaN(d.getTime())) return iso
-    const diff = Date.now() - d.getTime()
-    const min = Math.floor(diff / 60000)
-    if (min < 1) return '刚刚'
-    if (min < 60) return `${min} 分钟前`
-    const h = Math.floor(min / 60)
-    if (h < 24) return `${h} 小时前`
-    const dd = Math.floor(h / 24)
-    if (dd < 7) return `${dd} 天前`
-    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
     const day = String(d.getDate()).padStart(2, '0')
-    return `${mm}-${day}`
+    return `${y}-${m}-${day}`
   } catch {
     return iso
   }

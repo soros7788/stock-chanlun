@@ -291,9 +291,12 @@ export const stockApi = {
     return api.get<Quote>(`/stocks/${code}/quote`)
   },
 
-  kline(code: string, level: string, limit = 500) {
+  kline(code: string, level: string, limit = 500, startDate?: string, endDate?: string) {
+    const params = new URLSearchParams({ level, limit: String(limit) })
+    if (startDate) params.set('start_date', startDate)
+    if (endDate) params.set('end_date', endDate)
     return api.get<{ klines: KLine[]; total: number }>(
-      `/stocks/${code}/kline?level=${level}&limit=${limit}`
+      `/stocks/${code}/kline?${params.toString()}`
     )
   },
 
@@ -376,6 +379,52 @@ export const stockApi = {
     return api.delete<{ id: string; deleted: boolean }>(
       `/comments/${code}/${commentId}`
     )
+  },
+
+  // ─── AI 诊股对话（流式 SSE）────────────────────────────────────────────────
+
+  async *aiDiagnosisStream(
+    code: string,
+    question: string,
+    sessionId = 'default',
+    model = 'deepseek'
+  ): AsyncGenerator<string, void, unknown> {
+    const encodedQuestion = encodeURIComponent(question)
+    const url = `/api/ai/diagnosis?code=${encodeURIComponent(code)}&question=${encodedQuestion}&session_id=${encodeURIComponent(sessionId)}&model=${encodeURIComponent(model)}`
+
+    const resp = await fetch(url)
+    if (!resp.ok) {
+      throw new Error(`请求失败: ${resp.status}`)
+    }
+
+    const reader = resp.body?.getReader()
+    if (!reader) throw new Error('无法读取响应流')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6).trim()
+        if (!data || data === '[DONE]') continue
+        try {
+          const json = JSON.parse(data)
+          if (json.token) yield json.token
+          if (json.done) return
+          if (json.error) throw new Error(json.error)
+        } catch {
+          // 忽略解析错误
+        }
+      }
+    }
   },
 }
 
