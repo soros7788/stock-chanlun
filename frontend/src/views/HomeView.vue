@@ -10,14 +10,42 @@
           <router-link to="/watchlist" class="nav-link">自选股</router-link>
         </div>
         <div class="search-box">
-          <input
-            v-model="keyword"
-            @keydown.enter="search"
-            placeholder="输入股票代码或名称..."
-            class="search-input"
-          />
-          <button class="btn btn-primary" @click="search">搜索</button>
+          <div class="search-wrap">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input
+              v-model="keyword"
+              @keydown.enter="search"
+              @focus="onSearchFocus"
+              @blur="onSearchBlur"
+              placeholder="输入股票代码或名称..."
+              class="search-input"
+            />
+            <button v-if="keyword" class="search-clear" @click="keyword = ''; results = []" aria-label="清除">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M18 6 6 18M6 6l12 12"/>
+              </svg>
+            </button>
+            <div v-if="showHistory && searchHistory.length > 0 && !results.length" class="search-history">
+              <div class="history-head">
+                <span>最近搜索</span>
+                <button class="clear-btn" @click.stop="clearHistory">清除</button>
+              </div>
+              <div
+                v-for="h in searchHistory"
+                :key="h"
+                class="history-item"
+                @mousedown.prevent="selectHistory(h)"
+              >{{ h }}</div>
+            </div>
+          </div>
+          <button class="btn btn-primary search-btn" @click="search" :disabled="searching || !keyword.trim()">
+            <span v-if="searching">搜索中...</span>
+            <span v-else>搜索</span>
+          </button>
         </div>
+        <div v-if="searchError" class="search-error-inline">{{ searchError }}</div>
       </div>
     </nav>
 
@@ -126,6 +154,7 @@
                   :key="'hb-' + idx"
                   class="hot-board-cell"
                   :class="sectorPillClass(b.change_pct)"
+                  @click="goSector(b.name)"
                 >
                   <span class="hb-name">{{ b.name }}</span>
                   <span class="hb-pct mono"
@@ -150,6 +179,7 @@
                     class="sector-pill"
                     :class="sectorPillClass(s.change_pct)"
                     :title="`${s.name} ${s.change_pct >= 0 ? '+' : ''}${s.change_pct.toFixed(2)}%`"
+                    @click="goSector(s.name)"
                   >
                     <span class="pill-name">{{ s.name }}</span>
                     <span class="pill-pct mono"
@@ -169,7 +199,7 @@
                   领涨
                 </div>
                 <ul class="sectors-list">
-                  <li v-for="(s, i) in sectorTopList" :key="'t-' + i" class="sector-item">
+                  <li v-for="(s, i) in sectorTopList" :key="'t-' + i" class="sector-item" @click="goSector(s.name)">
                     <span class="si-name">{{ s.name }}</span>
                     <span class="si-pct mono price-up">+{{ s.change_pct.toFixed(2) }}%</span>
                   </li>
@@ -183,7 +213,7 @@
                   领跌
                 </div>
                 <ul class="sectors-list">
-                  <li v-for="(s, i) in sectorBottomList" :key="'b-' + i" class="sector-item">
+                  <li v-for="(s, i) in sectorBottomList" :key="'b-' + i" class="sector-item" @click="goSector(s.name)">
                     <span class="si-name">{{ s.name }}</span>
                     <span class="si-pct mono"
                       :class="s.change_pct >= 0 ? 'price-up' : 'price-down'"
@@ -300,6 +330,57 @@ const keyword = ref('')
 const results = ref<{ code: string; name: string }[]>([])
 const searching = ref(false)
 const searchError = ref('')
+const searchHistory = ref<string[]>(JSON.parse(localStorage.getItem('search_history') ?? 'null') ?? [])
+const showHistory = ref(false)
+const blurTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+
+function onSearchFocus() {
+  showHistory.value = true
+}
+
+function onSearchBlur() {
+  blurTimer.value = setTimeout(() => { showHistory.value = false }, 150)
+}
+
+function saveHistory(q: string) {
+  const q2 = q.trim()
+  if (!q2) return
+  const h = searchHistory.value.filter(x => x !== q2)
+  h.unshift(q2)
+  searchHistory.value = h.slice(0, 10)
+  localStorage.setItem('search_history', JSON.stringify(searchHistory.value))
+}
+
+function clearHistory() {
+  searchHistory.value = []
+  localStorage.removeItem('search_history')
+}
+
+async function search() {
+  if (!keyword.value.trim()) return
+  saveHistory(keyword.value.trim())
+  searching.value = true
+  searchError.value = ''
+  showHistory.value = false
+  try {
+    const res = await stockApi.search(keyword.value)
+    results.value = res.data.stocks ?? []
+  } catch (e: any) { searchError.value = e.message }
+  finally { searching.value = false }
+}
+
+function selectHistory(q: string) {
+  keyword.value = q
+  search()
+}
+
+function goToStock(code: string) {
+  router.push(`/stock/${code}`)
+}
+
+function goSector(name: string) {
+  router.push(`/sector/${encodeURIComponent(name)}`)
+}
 
 // ── 大盘数据 ──
 const emptyOverview = (): MarketOverview => ({
@@ -392,21 +473,6 @@ async function fetchNews() {
 onMounted(async () => {
   await Promise.allSettled([fetchHot(), fetchMarket(), fetchNews()])
 })
-
-async function search() {
-  if (!keyword.value.trim()) return
-  searching.value = true
-  searchError.value = ''
-  try {
-    const res = await stockApi.search(keyword.value)
-    results.value = res.data.stocks ?? []
-  } catch (e: any) { searchError.value = e.message }
-  finally { searching.value = false }
-}
-
-function goToStock(code: string) {
-  router.push(`/stock/${code}`)
-}
 </script>
 
 <style scoped>
@@ -428,18 +494,82 @@ function goToStock(code: string) {
   gap: 8px;
   max-width: 380px;
   flex: 1;
+  position: relative;
+  align-items: center;
 }
+.search-wrap { position: relative; flex: 1; display: flex; align-items: center; gap: 6px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; transition: border-color 0.15s; }
+.search-wrap:focus-within { border-color: var(--accent-blue); }
+.search-icon { flex-shrink: 0; color: var(--text-muted); }
 .search-input {
   flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  padding: 7px 0;
+}
+.search-input:focus { border-color: var(--accent-blue); }
+
+.search-clear {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: color 0.15s;
+}
+.search-clear:hover { color: var(--text-primary); }
+
+.search-btn { flex-shrink: 0; min-width: 68px; }
+.search-btn:disabled { opacity: 0.6; cursor: default; filter: none; }
+
+.search-error-inline { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 200; background: var(--bg-card); border: 1px solid var(--accent-red); border-radius: 8px; padding: 6px 12px; font-size: 0.8rem; color: var(--accent-red); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+
+.search-history {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 7px 14px;
-  color: var(--text-primary);
-  font-size: 0.875rem;
-  outline: none;
+  z-index: 100;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
 }
-.search-input:focus { border-color: var(--accent-blue); }
+.history-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px 4px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.clear-btn {
+  background: none;
+  border: none;
+  color: var(--accent-blue);
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0;
+}
+.history-item {
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.history-item:hover { background: var(--bg-hover); }
 
 /* ── 容器 ── */
 .container {
@@ -646,6 +776,7 @@ function goToStock(code: string) {
   transition: opacity 0.15s;
 }
 .sector-pill:hover { opacity: 0.75; }
+.sector-pill, .sector-item, .hot-board-cell { cursor: pointer; }
 .pill-up { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.22); }
 .pill-up .pill-name, .pill-up .pill-pct { color: var(--accent-red); }
 .pill-down { background: rgba(34,197,94,0.10); border-color: rgba(34,197,94,0.22); }

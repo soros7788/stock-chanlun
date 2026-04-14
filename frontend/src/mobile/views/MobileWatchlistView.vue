@@ -3,6 +3,12 @@
     <div class="page-head">
       <h2 class="page-title">我的自选</h2>
       <span class="page-count">{{ store.stocks.length }} 支</span>
+      <button class="refresh-btn" @click="store.fetchWatchlist()" :class="{ spinning: store.loading }">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </button>
     </div>
 
     <div v-if="store.loading" class="page-loading">
@@ -32,7 +38,10 @@
       >
         <div class="sr-left">
           <div class="sr-name">{{ s.name || s.code }}</div>
-          <div class="sr-code mono">{{ s.code }}</div>
+          <div class="sr-code-row">
+            <span class="sr-code mono">{{ s.code }}</span>
+            <span v-if="s.added_at" class="sr-added">{{ fmtAdded(s.added_at) }}</span>
+          </div>
         </div>
         <div class="sr-center">
           <div class="sr-price mono">{{ s.price > 0 ? s.price.toFixed(2) : '—' }}</div>
@@ -73,6 +82,18 @@ function fmtVol(v?: number) {
   return String(v)
 }
 
+function fmtAdded(iso: string): string {
+  try {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return ''
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${m}-${day}`
+  } catch {
+    return ''
+  }
+}
+
 function go(path: string) {
   router.push(path)
 }
@@ -96,7 +117,7 @@ onMounted(() => {
 
 .page-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 .page-title {
@@ -106,7 +127,29 @@ onMounted(() => {
 .page-count {
   font-size: 0.78rem;
   color: var(--text-muted);
+  flex: 1;
 }
+
+.refresh-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.refresh-btn:active {
+  color: var(--accent-blue);
+  background: var(--bg-hover);
+}
+.refresh-btn.spinning svg {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .page-loading {
   display: flex;
@@ -192,6 +235,18 @@ onMounted(() => {
 .sr-code {
   font-size: 0.7rem;
   color: var(--text-muted);
+}
+
+.sr-code-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sr-added {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  opacity: 0.7;
 }
 
 .sr-center {

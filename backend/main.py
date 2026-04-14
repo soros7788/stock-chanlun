@@ -25,7 +25,10 @@ import math
 import os
 import json
 import uuid
+import asyncio
 from datetime import datetime, timezone
+
+import httpx
 
 # 加载 .env 环境变量
 try:
@@ -33,6 +36,7 @@ try:
     load_dotenv()
 except ImportError:
     pass  # 未安装 python-dotenv 时忽略
+import sys
 from pathlib import Path
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,6 +57,7 @@ from services.akshare_service import (
     get_daily_hot_stocks, warm_hot_cache,
     get_market_overview_bundle, get_stock_news,
     get_stock_depth_em, get_stock_boards_em, get_stock_symbol_news_em,
+    get_board_constituents_em,
 )
 
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
@@ -100,7 +105,7 @@ def _run_analysis(code: str, level: str, kline_limit: int = 500) -> ChanlunAnaly
 
     if df.empty or len(df) < 20:
         raise HTTPException(status_code=404,
-                            detail=f"K线数据不足: {code} {level}")
+                            detail=f"{code} {level}级别K线数据不足（仅{len(df) if not df.empty else 0}根），请换日线/30分钟级别尝试")
 
     if len(df) > kline_limit:
         df = df.tail(kline_limit).reset_index(drop=True)
@@ -250,6 +255,16 @@ def news(limit: int = Query(10, ge=1, le=30)):
     return {"items": get_stock_news(limit)}
 
 
+@app.get("/api/sector/{name}/stocks", tags=["数据"])
+def sector_stocks(name: str):
+    """板块成分股（行业/概念）：返回按涨跌幅降序排列的成分股列表"""
+    try:
+        return get_board_constituents_em(name)
+    except Exception as e:
+        print(f"[板块] 「{name}」获取失败: {e}")
+        return {"sector_name": name, "board_type": None, "stocks": [], "total": 0}
+
+
 @app.get("/api/stocks/{code}/info", tags=["数据"])
 def stock_info(code: str):
     """获取股票基本信息"""
@@ -316,13 +331,21 @@ def realtime_quote(code: str):
 def stock_kline(
     code: str,
     level: str = Query("daily", pattern="^(1min|5min|15min|30min|60min|daily|weekly|monthly)$"),
-    limit: int = Query(500, le=2000)
+    limit: int = Query(500, le=2000),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD")
 ):
     """获取K线数据"""
     period = _level_to_period(level)
     df = get_kline_hist(code, period=period, adjust="qfq")
     if df.empty:
         return {"klines": [], "total": 0}
+
+    # 时间范围筛选
+    if start_date:
+        df = df[df['date'] >= pd.Timestamp(start_date)]
+    if end_date:
+        df = df[df['date'] <= pd.Timestamp(end_date) + pd.Timedelta(days=1)]
 
     df = df.tail(limit).reset_index(drop=True)
 
@@ -506,9 +529,9 @@ def ai_signal(
             "direction": llm_result.get("direction") if llm_result else signal.direction,
             "confidence": llm_result.get("confidence") if llm_result else signal.confidence,
             "risk_level": llm_result.get("risk_level") if llm_result else signal.risk_level,
-            "entry_price": llm_result.get("entry_price") if llm_result else signal.entry_price,
-            "stop_loss": llm_result.get("stop_loss") if llm_result else signal.stop_loss,
-            "take_profit": llm_result.get("take_profit") if llm_result else signal.take_profit,
+            "entry_price": llm_result.get("entry_price") or signal.entry_price,
+            "stop_loss": llm_result.get("stop_loss") or signal.stop_loss,
+            "take_profit": llm_result.get("take_profit") or signal.take_profit,
             "holding_period": llm_result.get("holding_period") if llm_result else signal.holding_period,
             "description": llm_result.get("reasoning") if llm_result else signal.description,
             "trend": wave_class['trend'],
@@ -531,24 +554,25 @@ def ai_signal(
 _WATCHLIST_FILE = Path(__file__).parent / "watchlist.json"
 
 
-def _load_watchlist() -> list[str]:
+def _load_watchlist() -> dict[str, str]:
+    """返回 {股票代码: 添加时间ISO字符串}"""
     try:
         if _WATCHLIST_FILE.exists():
-            codes = json.loads(_WATCHLIST_FILE.read_text(encoding="utf-8"))
-            return [str(c).zfill(6) for c in codes if str(c).strip()]
+            data = json.loads(_WATCHLIST_FILE.read_text(encoding="utf-8"))
+            return {str(k).zfill(6): str(v) for k, v in data.items() if str(k).strip()}
     except Exception as e:
         print(f"自选股加载失败: {e}")
-    return []
+    return {}
 
 
-def _save_watchlist(codes: list[str]):
+def _save_watchlist(data: dict[str, str]):
     try:
-        _WATCHLIST_FILE.write_text(json.dumps(codes, ensure_ascii=False, indent=2), encoding="utf-8")
+        _WATCHLIST_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
         print(f"自选股保存失败: {e}")
 
 
-_watchlist: list[str] = _load_watchlist()
+_watchlist: dict[str, str] = _load_watchlist()
 
 
 @app.get("/api/watchlist", tags=["自选"])
@@ -557,7 +581,8 @@ def get_watchlist():
     if not _watchlist:
         return {"stocks": []}
 
-    df = get_realtime_quote(_watchlist)
+    codes = list(_watchlist.keys())
+    df = get_realtime_quote(codes)
     if df.empty:
         return {"stocks": [], "total": 0}
 
@@ -568,6 +593,7 @@ def get_watchlist():
                 "name": str(row.get("名称", "")),
                 "price": float(row.get("最新价", 0) or 0),
                 "change_pct": float(row.get("涨跌幅", 0) or 0),
+                "added_at": _watchlist.get(str(row.get("代码", "")), ""),
             }
             for _, row in df.iterrows()
         ],
@@ -580,9 +606,9 @@ def add_watchlist(code: str):
     """添加自选股"""
     sym, _ = normalize_stock_code(code)
     if sym not in _watchlist:
-        _watchlist.append(sym)
+        _watchlist[sym] = datetime.now().isoformat()
         _save_watchlist(_watchlist)
-    return {"code": sym, "added": True, "total": len(_watchlist)}
+    return {"code": sym, "added": True, "added_at": _watchlist[sym], "total": len(_watchlist)}
 
 
 @app.delete("/api/watchlist/{code}", tags=["自选"])
@@ -590,7 +616,7 @@ def remove_watchlist(code: str):
     """删除自选股"""
     sym, _ = normalize_stock_code(code)
     if sym in _watchlist:
-        _watchlist.remove(sym)
+        del _watchlist[sym]
         _save_watchlist(_watchlist)
     return {"code": sym, "removed": True, "total": len(_watchlist)}
 
@@ -722,6 +748,232 @@ def update_settings(model: str = Query(..., description="AI 模型 deepseek / ge
     s["ai_model"] = model
     _save_settings(s)
     return {"ai_model": model, "ok": True}
+
+
+# ─── AI 诊股对话 API（流式 SSE）────────────────────────────────────────────────
+
+class _ChatSession:
+    """轻量对话会话：维护最近 N 轮历史"""
+
+    def __init__(self, max_turns: int = 10):
+        self.messages: list[dict] = []
+        self.max_turns = max_turns
+
+    def add(self, role: str, content: str):
+        self.messages.append({"role": role, "content": content})
+        if len(self.messages) > self.max_turns * 2:
+            self.messages = self.messages[-self.max_turns * 2:]
+
+    def history(self) -> list[dict]:
+        return self.messages
+
+
+# 内存中会话（进程重启后清空）
+_chat_sessions: dict[str, _ChatSession] = {}
+
+
+def _get_or_create_session(session_id: str) -> _ChatSession:
+    if session_id not in _chat_sessions:
+        _chat_sessions[session_id] = _ChatSession(max_turns=10)
+    return _chat_sessions[session_id]
+
+
+@app.get("/api/ai/diagnosis", tags=["AI诊股"])
+async def ai_diagnosis(
+    code: str = Query(..., description="股票代码"),
+    question: str = Query(..., description="用户问题"),
+    session_id: str = Query("default", description="会话ID"),
+    model: str = Query("deepseek", description="AI模型"),
+):
+    """
+    AI 诊股对话接口（流式 SSE）。
+    用户描述股票问题，AI 结合缠论数据给出诊断。
+    """
+    sys.stdout.write(f"[AI诊断] GET 请求进入，code={code}, question={question[:20]}, session={session_id}\n")
+    sys.stdout.flush()
+    from ai.llm_client import get_llm_client, set_llm_model
+    from chanlun.engine import ChanlunEngine
+
+    # 加载/切换模型
+    if model not in ("deepseek", "gemini"):
+        model = "deepseek"
+
+    async def event_stream():
+        sys.stdout.write(f"[AI诊断] event_stream 启动，session={session_id}\n")
+        sys.stdout.flush()
+        try:
+            sys.stdout.write(f"[AI诊断] 准备加载 LLM，model={model}\n")
+            sys.stdout.flush()
+            llm = get_llm_client(model)
+            sys.stdout.write(f"[AI诊断] LLM 加载成功\n")
+            sys.stdout.flush()
+            sym, exchange = normalize_stock_code(code)
+
+            # 尝试获取股票名称
+            stock_name = ""
+            try:
+                info = get_stock_info(sym)
+                stock_name = str(info.get("名称", sym))
+            except Exception:
+                stock_name = sym
+
+            # 尝试获取缠论分析数据
+            analysis_context = ""
+            try:
+                result = _run_analysis(sym, "daily")
+                current_price = float(result.klines[-1].close) if result.klines else 0.0
+
+                # 构建分析上下文
+                recent_kl = result.klines[-20:] if len(result.klines) > 20 else result.klines
+                kl_lines = "\n".join(
+                    f"{k.date[:10]}  开:{k.open:.2f} 高:{k.high:.2f} 低:{k.low:.2f} 收:{k.close:.2f}"
+                    for k in recent_kl
+                )
+                bi_lines = "\n".join(
+                    f"[{b.start[:10]}] {b.direction} 高:{b.high:.2f} 低:{b.low:.2f}"
+                    for b in result.bis[-5:]
+                )
+                zs_lines = "\n".join(
+                    f"[{z.start[:10]}] 中枢 高:{z.range_high:.2f} 低:{z.range_low:.2f}"
+                    for z in result.zhongshus[-3:]
+                )
+                sig_lines = "\n".join(
+                    f"{s.datetime[:10]} {s.type}@{s.price:.2f} 置信:{s.confidence}"
+                    for s in result.signals[-5:]
+                )
+
+                analysis_context = f"""
+【{stock_name}({sym}) 日线数据】
+最近K线：\n{kl_lines}
+笔：\n{bi_lines or '暂无'}
+中枢：\n{zs_lines or '暂无'}
+买卖点：\n{sig_lines or '暂无'}
+趋势：{result.trend}"""
+            except Exception as e:
+                analysis_context = f"[缠论数据获取失败: {e}]"
+
+            # 系统提示词
+            system_prompt = f"""你是专业的缠论技术分析助手，名称"缠师"。
+
+用户会向你询问股票诊断问题。请结合以下缠论数据，
+用通俗易懂的语言给出诊断建议，避免过于专业的术语堆砌。
+
+当前股票数据：
+{analysis_context}
+
+回答要求：
+1. 先确认用户问的股票，分析当前走势和位置
+2. 结合缠论关键点（笔、中枢、背驰、买卖点）
+3. 给出明确操作建议（买入/卖出/观望）
+4. 如需要，提示风险和止损位
+5. 保持友好专业的语气，像一个老练的分析师在聊天
+
+重要：如果没有股票数据，请直接说明并建议用户提供股票代码。"""
+
+            # 添加用户消息到历史
+            session = _get_or_create_session(session_id)
+            session.add("user", question)
+
+            # 构建消息列表
+            messages = [{"role": "system", "content": system_prompt}] + session.history()
+
+            # 流式调用 DeepSeek
+            full_text = ""
+            try:
+                if model.startswith("deepseek"):
+                    key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+                    if not key:
+                        yield f"data: {json.dumps({'error': 'DEEPSEEK_API_KEY 未设置，请在 .env 中配置'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    sys.stdout.write(f"[AI诊断] DeepSeek 流式调用开始，session={session_id}\n")
+                    sys.stdout.flush()
+                    # 使用 SSE 流式 API，禁用代理避免网络问题
+                    body = {
+                        "model": "deepseek-chat",
+                        "messages": messages,
+                        "temperature": 0.4,
+                        "stream": True,
+                    }
+                    async with httpx.AsyncClient(timeout=120.0) as client:
+                        async with client.stream(
+                            "POST",
+                            "https://api.deepseek.com/v1/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {key}",
+                                "Content-Type": "application/json",
+                            },
+                            json=body,
+                        ) as resp:
+                            sys.stdout.write(f"[AI诊断] DeepSeek 响应状态: {resp.status_code}\n")
+                            sys.stdout.flush()
+                            resp.raise_for_status()
+                            async for line in resp.aiter_lines():
+                                if not line.strip() or not line.startswith("data:"):
+                                    continue
+                                data = line[5:].strip()
+                                if data == "[DONE]":
+                                    break
+                                try:
+                                    chunk = json.loads(data)
+                                    content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                    if content:
+                                        full_text += content
+                                        yield f"data: {json.dumps({'token': content}, ensure_ascii=False)}\n\n"
+                                except json.JSONDecodeError:
+                                    continue
+                    sys.stdout.write(f"[AI诊断] DeepSeek 流式完成，回复长度: {len(full_text)}\n")
+                    sys.stdout.flush()
+
+                elif model.startswith("gemini"):
+                    key = os.environ.get("GEMINI_API_KEY", "").strip()
+                    if not key:
+                        yield f"data: {json.dumps({'error': 'GEMINI_API_KEY 未设置，请在 .env 中配置'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    # Gemini 非流式
+                    from ai.llm_client import LLMClient
+                    gemini_client = LLMClient(model=model)
+                    full_text = gemini_client.chat(
+                        prompt=question,
+                        system=system_prompt,
+                        temperature=0.4,
+                    )
+                    for char in full_text:
+                        yield f"data: {json.dumps({'token': char}, ensure_ascii=False)}\n\n"
+                        await asyncio.sleep(0.02)  # 打字机效果延迟
+
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+            # 保存助手回复到历史
+            session.add("assistant", full_text)
+
+            # 结束信号
+            yield f"data: {json.dumps({'done': True, 'full': full_text}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/ai/diagnosis", tags=["AI诊股"])
+async def ai_diagnosis_post(
+    code: str = Query(...),
+    question: str = Query(...),
+    session_id: str = Query("default"),
+    model: str = Query("deepseek"),
+):
+    """POST 版本的诊股接口（URL 编码问题少）"""
+    return await ai_diagnosis(code=code, question=question, session_id=session_id, model=model)
 
 
 # ─── 健康检查 ───────────────────────────────────────────────────────────────

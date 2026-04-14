@@ -46,24 +46,36 @@
 
       <div v-else class="stock-table">
         <div class="table-header">
-          <span>代码</span>
-          <span>名称</span>
-          <span>现价</span>
-          <span>涨跌幅</span>
+          <span class="sort-col" :class="{ active: sortKey === 'code' }" @click="setSort('code')">
+            代码 <span class="sort-icon">{{ sortIcon('code') }}</span>
+          </span>
+          <span class="sort-col" :class="{ active: sortKey === 'name' }" @click="setSort('name')">
+            名称 <span class="sort-icon">{{ sortIcon('name') }}</span>
+          </span>
+          <span class="sort-col" :class="{ active: sortKey === 'price' }" @click="setSort('price')">
+            现价 <span class="sort-icon">{{ sortIcon('price') }}</span>
+          </span>
+          <span class="sort-col" :class="{ active: sortKey === 'change_pct' }" @click="setSort('change_pct')">
+            涨跌幅 <span class="sort-icon">{{ sortIcon('change_pct') }}</span>
+          </span>
+          <span class="sort-col" :class="{ active: sortKey === 'added_at' }" @click="setSort('added_at')">
+            自选时间 <span class="sort-icon">{{ sortIcon('added_at') }}</span>
+          </span>
           <span></span>
         </div>
-        <div
-          v-for="stock in store.stocks"
-          :key="stock.code"
-          class="table-row"
-          @click="goToStock(stock.code)"
-        >
+          <div
+            v-for="stock in sortedStocks"
+            :key="stock.code"
+            class="table-row"
+            @click="goToStock(stock.code)"
+          >
           <span class="mono">{{ stock.code }}</span>
           <span class="name">{{ stock.name }}</span>
           <span class="mono">{{ stock.price?.toFixed(2) || '—' }}</span>
           <span class="mono" :class="stock.change_pct > 0 ? 'price-up' : 'price-down'">
             {{ stock.change_pct > 0 ? '+' : '' }}{{ stock.change_pct?.toFixed(2) || 0 }}%
           </span>
+          <span class="added-time">{{ formatAddedTime(stock.added_at) }}</span>
           <button class="remove-btn" @click.stop="removeStock(stock.code)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 6L6 18M6 6l12 12"/>
@@ -76,18 +88,65 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWatchlistStore } from '../stores/watchlist'
 
 const router = useRouter()
 const store = useWatchlistStore()
 const addCode = ref('')
+const sortKey = ref<string>('added_at')
+const sortDir = ref<'asc' | 'desc'>('desc')
+
+function setSort(key: string) {
+  if (sortKey.value === key) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortKey.value = key
+    sortDir.value = 'desc'
+  }
+}
+
+function sortIcon(key: string): string {
+  if (sortKey.value !== key) return ''
+  return sortDir.value === 'asc' ? '▲' : '▼'
+}
+
+const sortedStocks = computed(() => {
+  const list = [...store.stocks]
+  const key = sortKey.value
+  const dir = sortDir.value === 'asc' ? 1 : -1
+  list.sort((a, b) => {
+    const av = a[key as keyof typeof a]
+    const bv = b[key as keyof typeof b]
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * dir
+    return ((av as number) - (bv as number)) * dir
+  })
+  return list
+})
 
 function formatTime(d: Date): string {
   const h = String(d.getHours()).padStart(2, '0')
   const m = String(d.getMinutes()).padStart(2, '0')
   return `${h}:${m}`
+}
+
+function formatAddedTime(iso: string | undefined): string {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return '—'
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const h = String(d.getHours()).padStart(2, '0')
+    const min = String(d.getMinutes()).padStart(2, '0')
+    return `${m}-${day} ${h}:${min}`
+  } catch {
+    return '—'
+  }
 }
 
 function goToStock(code: string) { router.push(`/stock/${code}`) }
@@ -150,7 +209,7 @@ onMounted(() => store.fetchWatchlist())
 
 .table-header, .table-row {
   display: grid;
-  grid-template-columns: 100px 1fr 100px 120px 40px;
+  grid-template-columns: 100px 1fr 100px 120px 130px 40px;
   align-items: center;
   padding: 12px 16px;
   border-radius: 8px;
@@ -162,6 +221,18 @@ onMounted(() => store.fetchWatchlist())
   letter-spacing: 0.5px;
   color: var(--text-muted);
 }
+.sort-col {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+  padding: 2px 4px;
+  transition: color 0.15s;
+}
+.sort-col:hover, .sort-col.active { color: var(--accent-blue); }
+.sort-icon { font-size: 0.6rem; }
 .table-row {
   background: var(--bg-card);
   cursor: pointer;
@@ -182,4 +253,9 @@ onMounted(() => store.fetchWatchlist())
 .remove-btn:hover { color: var(--accent-red); background: rgba(248,81,73,0.1); }
 
 .name { font-weight: 500; }
+
+.added-time {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
 </style>

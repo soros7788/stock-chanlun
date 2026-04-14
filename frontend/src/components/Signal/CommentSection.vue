@@ -49,6 +49,7 @@
           :key="c.id"
           class="comment-item"
           :class="{ 'comment-item--editing': editingId === c.id }"
+          :data-comment-id="c.id"
         >
           <!-- 卡片视图（不在编辑状态时显示） -->
           <template v-if="editingId !== c.id">
@@ -128,7 +129,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useCommentStore } from '../../stores/comment'
 import type { Comment } from '../../api/stock'
 
@@ -166,7 +167,14 @@ async function submit() {
       await store.addComment(props.stockCode, content)
       showSuccess('笔记发布成功')
     }
+    const prevId = editingId.value
     cancelEdit()
+    if (prevId) {
+      nextTick(() => {
+        const el = document.querySelector(`[data-comment-id="${prevId}"]`)
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    }
   } finally {
     submitting.value = false
   }
@@ -197,17 +205,10 @@ function formatTime(iso: string): string {
   try {
     const d = new Date(iso)
     if (isNaN(d.getTime())) return iso
-    const diff = Date.now() - d.getTime()
-    const min = Math.floor(diff / 60000)
-    if (min < 1) return '刚刚'
-    if (min < 60) return `${min} 分钟前`
-    const h = Math.floor(min / 60)
-    if (h < 24) return `${h} 小时前`
-    const dd = Math.floor(h / 24)
-    if (dd < 7) return `${dd} 天前`
-    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
     const day = String(d.getDate()).padStart(2, '0')
-    return `${mm}-${day}`
+    return `${y}-${m}-${day}`
   } catch {
     return iso
   }
