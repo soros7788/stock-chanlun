@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
         '@': resolve(__dirname, 'src')
       }
     },
-    base: env.VITE_BASE_URL || '/',
+    base: env.VITE_BASE_URL || '/stock-chanlun/',
     server: {
       port: 5173,
       proxy: {
