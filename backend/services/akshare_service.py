@@ -12,42 +12,22 @@ from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import httpx
 
-# ─── requests 全局超时补丁 ─────────────────────────────────────────────────
-# akshare / requests 内部不带 timeout，Windows 代理环境下 SSL 会永远挂住。
-# 这里在 akshare_service 导入时立即 patch requests.HTTPAdapter.send，
-# 所有后续 requests 调用均自动走禁用代理+默认超时。
-try:
-    import requests
-    _orig_send = requests.adapters.HTTPAdapter.send
-    _NO_PROXY = {"http": None, "https": None}
-    _EM_HOSTS = ("eastmoney", "qt.gtimg", "sinajs", "ifzq", "10jqka")
+from utils import with_retry
 
-    def _patched_send(adapter, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
-        url = getattr(request, 'url', '') or ''
-        if timeout is None and url:
-            timeout = 12.0
-        if proxies is None and url and any(h in url for h in _EM_HOSTS):
-            proxies = _NO_PROXY
-            verify = False
-        return _orig_send(adapter, request, stream=stream, timeout=timeout, verify=verify, cert=cert, proxies=proxies)
-
-    requests.adapters.HTTPAdapter.send = _patched_send
-    print("[补丁] requests.HTTPAdapter.send: timeout=12s + 禁用代理 for eastmoney")
-except Exception as e:
-    print(f"[补丁] 注入失败: {e}")
-
-# 创建 HTTP 客户端
-_http_client: httpx.AsyncClient | httpx.Client | None = None
+# 创建 HTTP 客户端（带重试机制的同步客户端）
+_http_client: httpx.Client | None = None
 
 
 def _get_client() -> httpx.Client:
-    """获取或创建 HTTP 客户端（禁用代理，直连）"""
+    """获取或创建 HTTP 客户端（禁用代理，直连，共享连接池）"""
     global _http_client
     if _http_client is None:
+        limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
         _http_client = httpx.Client(
             timeout=30.0,
             follow_redirects=True,
-            trust_env=False,  # 禁用代理，避免代理导致 SSL 超时
+            trust_env=False,
+            limits=limits,
             headers={
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Referer': 'https://finance.qq.com/',
@@ -397,7 +377,8 @@ def get_kline_hist(
         df = pd.DataFrame(records)
         if not df.empty:
             df['date'] = pd.to_datetime(df['date'])
-            _cache_set(cache_key, df, ttl=300 if period == "daily" else 3600)
+            # 分钟数据缓存 30 秒（盘中波动大）；日线缓存 5 分钟
+            _cache_set(cache_key, df, ttl=30 if period in minute_periods else 300)
         return df
     except Exception as e:
         print(f"K线获取失败 {code} {period}: {e}")

@@ -2,10 +2,11 @@
 选股服务 — 按基础指标、缠论买卖点、MACD+SKDJ 双金叉筛选股票。
 """
 import threading
+import time
 from typing import Optional
 import pandas as pd
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 from chanlun.elements import BuySellPoint
 from chanlun.engine import ChanlunEngine
@@ -16,6 +17,7 @@ from services.akshare_service import (
     get_stock_info,
     get_stock_boards_em,
 )
+from utils import chanlun_cache
 
 
 # ─── MACD / SKDJ（同前端 stockIndicators.ts 算法） ────────────────────────────
@@ -158,12 +160,17 @@ def _analyze_stock(code: str, level: str) -> dict | None:
 
         # 取最近 200 根 K 线加速
         df = df.tail(200).reset_index(drop=True)
-
         dates = df['date'].astype(str).tolist()
 
-        # 缠论分析
-        engine = ChanlunEngine(df)
-        result = engine.analyze(level=level)
+        # 优先从缠论缓存读取
+        cache_key = f"{code}:{level}"
+        cached_result = chanlun_cache.get(cache_key)
+        if cached_result is not None:
+            result = cached_result
+        else:
+            engine = ChanlunEngine(df)
+            result = engine.analyze(level=level)
+            chanlun_cache.set(cache_key, result)
 
         # 取最近一笔信号
         latest_signal: BuySellPoint | None = None
@@ -345,8 +352,8 @@ def screen_stocks_stream(
                 yield {"type": "progress", "done": done_count, "total": len(prefiltered)}
 
             try:
-                analysis = future.result(timeout=90)
-            except Exception:
+                analysis = future.result(timeout=30)  # 单只股票分析超时 30 秒
+            except (FuturesTimeoutError, TimeoutError):
                 analysis = None
 
             if analysis is None:
