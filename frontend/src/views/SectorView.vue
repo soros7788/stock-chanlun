@@ -52,6 +52,7 @@
 
       <!-- 成分股表格 -->
       <div v-else class="stock-table">
+        <!-- 表头（非虚拟化，保持固定） -->
         <div class="table-header">
           <span>排名</span>
           <span>名称</span>
@@ -63,40 +64,48 @@
           <span>市净率</span>
           <span></span>
         </div>
-        <div
-          v-for="s in stocks"
-          :key="s.code"
-          class="table-row"
-          @click="goToStock(s.code)"
-        >
-          <span class="rank-cell">
-            <span class="rank-num" :class="rankClass(s.rank)">#{{ s.rank }}</span>
-          </span>
-          <span class="name-cell">{{ s.name }}</span>
-          <span class="mono code-cell">{{ s.code }}</span>
-          <span class="mono">{{ s.price > 0 ? s.price.toFixed(2) : '—' }}</span>
-          <span class="mono" :class="s.change_pct >= 0 ? 'price-up' : 'price-down'">
-            {{ s.change_pct >= 0 ? '+' : '' }}{{ s.change_pct.toFixed(2) }}%
-          </span>
-          <span class="mono secondary">
-            {{ s.turnover_pct > 0 ? s.turnover_pct.toFixed(2) + '%' : '—' }}
-          </span>
-          <span class="mono secondary">
-            {{ s.pe_ttm > 0 ? s.pe_ttm.toFixed(2) : '—' }}
-          </span>
-          <span class="mono secondary">
-            {{ s.pb > 0 ? s.pb.toFixed(2) : '—' }}
-          </span>
-          <span class="action-cell">
-            <button
-              class="add-watch-btn"
-              :class="{ added: isWatched(s.code) }"
-              @click.stop="toggleWatch(s.code)"
+        <!-- 行区域（虚拟滚动） -->
+        <div class="vscroll-wrap" v-bind="containerProps">
+          <div class="vscroll-spacer" v-bind="wrapperProps">
+            <div
+              v-for="s in visibleItems"
+              :key="s.code"
+              class="table-row"
+              :style="{ height: ROW_H + 'px' }"
+              @click="goToStock(s.code)"
             >
-              {{ isWatched(s.code) ? '已自选' : '+自选' }}
-            </button>
-          </span>
+              <span class="rank-cell">
+                <span class="rank-num" :class="rankClass(s.rank)">#{{ s.rank }}</span>
+              </span>
+              <span class="name-cell">{{ s.name }}</span>
+              <span class="mono code-cell">{{ s.code }}</span>
+              <span class="mono">{{ s.price > 0 ? s.price.toFixed(2) : '—' }}</span>
+              <span class="mono" :class="s.change_pct >= 0 ? 'price-up' : 'price-down'">
+                {{ s.change_pct >= 0 ? '+' : '' }}{{ s.change_pct.toFixed(2) }}%
+              </span>
+              <span class="mono secondary">
+                {{ s.turnover_pct > 0 ? s.turnover_pct.toFixed(2) + '%' : '—' }}
+              </span>
+              <span class="mono secondary">
+                {{ s.pe_ttm > 0 ? s.pe_ttm.toFixed(2) : '—' }}
+              </span>
+              <span class="mono secondary">
+                {{ s.pb > 0 ? s.pb.toFixed(2) : '—' }}
+              </span>
+              <span class="action-cell">
+                <button
+                  class="add-watch-btn"
+                  :class="{ added: isWatched(s.code) }"
+                  @click.stop="toggleWatch(s.code)"
+                >
+                  {{ isWatched(s.code) ? '已自选' : '+自选' }}
+                </button>
+              </span>
+            </div>
+          </div>
         </div>
+        <!-- 总数提示 -->
+        <div class="vscroll-count">{{ total }} 只成分股</div>
       </div>
     </div>
   </div>
@@ -108,6 +117,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { stockApi, type SectorStock } from '@/api/stock'
 import { useWatchlistStore } from '@/stores/watchlist'
 import toast from '@/composables/useToast'
+import { useVirtualScroll } from '@/composables/useVirtualScroll'
 
 const route = useRoute()
 const router = useRouter()
@@ -119,6 +129,15 @@ const total = ref(0)
 const boardType = ref<'industry' | 'concept' | null>(null)
 const loading = ref(true)
 const error = ref('')
+
+// 虚拟滚动（行业板块常有几百只成分股）
+const ROW_H = 48
+const { visibleItems, containerProps, wrapperProps } = useVirtualScroll<SectorStock>({
+  items: stocks,
+  itemHeight: ROW_H,
+  overscan: 5,
+  maxHeight: 580,
+})
 
 const watchedCodes = computed(() => new Set(watchlistStore.stocks.map(s => s.code)))
 
@@ -283,5 +302,24 @@ onMounted(() => {
   border-color: var(--accent-green);
   color: var(--accent-green);
   background: rgba(34, 197, 94, 0.08);
+}
+
+/* 虚拟滚动 */
+.vscroll-wrap {
+  overflow-y: auto;
+  max-height: 580px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.vscroll-wrap::-webkit-scrollbar { width: 4px; }
+.vscroll-wrap::-webkit-scrollbar-track { background: transparent; }
+.vscroll-wrap::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+.vscroll-spacer { position: relative; }
+.vscroll-count {
+  padding: 8px 16px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-align: center;
+  border-top: 1px solid var(--divider);
 }
 </style>

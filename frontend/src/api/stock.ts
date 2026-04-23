@@ -349,6 +349,18 @@ export const stockApi = {
     )
   },
 
+  /** 多级别并行缠论分析 */
+  chanlunMultiLevel(code: string, levels: string[]) {
+    return api.get<{
+      code: string
+      levels: Record<string, unknown>
+      count: number
+      elapsed_ms: number
+    }>(
+      `/chanlun/${code}/multi-level?levels=${levels.join(',')}`
+    )
+  },
+
   watchlist() {
     return api.get<{ stocks: Quote[]; total: number }>('/watchlist')
   },
