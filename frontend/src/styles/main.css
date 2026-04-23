@@ -53,6 +53,44 @@
   --tabbar-height: 60px;
 }
 
+/* 亮色主题 */
+[data-theme="light"] {
+  --bg-base: #f8fafc;
+  --bg-primary: #ffffff;
+  --bg-elevated: #f0f4f8;
+  --bg-secondary: #f1f5f9;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8fafc;
+  --bg-hover: #e8edf2;
+
+  --border: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --divider: rgba(0, 0, 0, 0.07);
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+
+  /* 行情色不变（A 股习惯） */
+  --accent-green: #16a34a;
+  --accent-red: #dc2626;
+  --accent-amber: #d97706;
+  --accent-blue: #0369a1;
+  --accent-purple: #7c3aed;
+  --accent-cyan: #0891b2;
+
+  --brand-from: #10b981;
+  --brand-via: #059669;
+  --brand-to: #047857;
+
+  --glow-brand: rgba(16, 185, 129, 0.25);
+  --glow-blue: rgba(3, 105, 161, 0.12);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-glow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 16px -4px rgba(0, 0, 0, 0.1);
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
@@ -63,8 +101,8 @@ html {
 body {
   background-color: var(--bg-base);
   background-image:
-    radial-gradient(ellipse 120% 80% at 50% -30%, rgba(52, 211, 153, 0.08), transparent 55%),
-    radial-gradient(ellipse 80% 50% at 100% 0%, rgba(56, 189, 248, 0.05), transparent 45%),
+    radial-gradient(ellipse 120% 80% at 50% -30%, rgba(16,185,129,0.04) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 50% at 100% 0%, rgba(56,189,248,0.03) 0%, transparent 45%),
     linear-gradient(180deg, var(--bg-base) 0%, var(--bg-primary) 35%, var(--bg-base) 100%);
   background-attachment: fixed;
   color: var(--text-primary);
@@ -190,11 +228,11 @@ h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
   position: sticky;
   top: 0;
   z-index: 100;
-  background: linear-gradient(180deg, rgba(11, 15, 20, 0.92) 0%, rgba(11, 15, 20, 0.78) 100%);
+  background: var(--bg-primary);
   backdrop-filter: blur(16px) saturate(1.2);
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
   border-bottom: 1px solid var(--border);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
 }
 .nav::after {
   content: '';

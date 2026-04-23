@@ -29,7 +29,24 @@
                 <path d="M18 6 6 18M6 6l12 12"/>
               </svg>
             </button>
-            <div v-if="showHistory && searchHistory.length > 0 && !results.length" class="search-history">
+            <!-- 实时搜索下拉 -->
+            <div v-if="liveResults.length > 0 && showHistory" class="live-dropdown">
+              <div
+                v-for="item in liveResults.slice(0, 6)"
+                :key="item.code"
+                class="live-item"
+                @mousedown.prevent="keyword = item.code; search()"
+              >
+                <span class="live-name">{{ item.name }}</span>
+                <span class="live-code mono">{{ item.code }}</span>
+              </div>
+            </div>
+            <!-- 无结果提示 -->
+            <div v-else-if="liveError === 'no-results' && showHistory && keyword.trim().length >= 2" class="live-no-results">
+              未找到 "{{ keyword.trim() }}" 相关股票
+            </div>
+            <!-- 搜索历史 -->
+            <div v-else-if="showHistory && searchHistory.length > 0 && !results.length" class="search-history">
               <div class="history-head">
                 <span>最近搜索</span>
                 <button class="clear-btn" @click.stop="clearHistory">清除</button>
@@ -47,6 +64,39 @@
             <span v-else>搜索</span>
           </button>
         </div>
+        <!-- 快捷键提示按钮 -->
+        <button class="kbd-hint-btn" @click="showKbdHint = !showKbdHint" title="快捷键">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="6" width="20" height="12" rx="2"/>
+            <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/>
+          </svg>
+        </button>
+        <!-- 主题切换按钮 -->
+        <button class="theme-btn" @click="toggleTheme" :title="isDark ? '切换亮色模式' : '切换暗色模式'">
+          <!-- 暗色模式图标（太阳 = 亮色） -->
+          <svg v-if="isDark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+          <!-- 亮色模式图标（月亮 = 暗色） -->
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+        <!-- 快捷键提示浮层 -->
+        <Transition name="kbd-fade">
+          <div v-if="showKbdHint" class="kbd-hint-panel" @click.stop>
+            <div class="kbd-panel-title">快捷键</div>
+            <div class="kbd-list">
+              <div class="kbd-item"><kbd>/</kbd><span>聚焦搜索框</span></div>
+              <div class="kbd-item"><kbd>R</kbd><span>刷新当前页面</span></div>
+              <div class="kbd-item"><kbd>1/5</kbd><span>切换 1分钟 / 5分钟</span></div>
+              <div class="kbd-item"><kbd>D</kbd><span>切换日线</span></div>
+              <div class="kbd-item"><kbd>W</kbd><span>切换周线</span></div>
+              <div class="kbd-item"><kbd>M</kbd><span>切换月线</span></div>
+            </div>
+            <button class="kbd-close" @click="showKbdHint = false">知道了</button>
+          </div>
+        </Transition>
         <div v-if="searchError" class="search-error-inline">{{ searchError }}</div>
       </div>
     </nav>
@@ -326,7 +376,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockApi, type HotStock, type MarketOverview, type NewsItem } from '../api/stock'
 import toast from '../composables/useToast'
@@ -340,6 +390,15 @@ const searching = ref(false)
 const searchError = ref('')
 const searchHistory = ref<string[]>(JSON.parse(localStorage.getItem('search_history') ?? 'null') ?? [])
 const showHistory = ref(false)
+const showKbdHint = ref(false)
+const isDark = ref(localStorage.getItem('theme') === 'dark')
+
+function toggleTheme() {
+  isDark.value = !isDark.value
+  const theme = isDark.value ? 'dark' : 'light'
+  localStorage.setItem('theme', theme)
+  document.documentElement.setAttribute('data-theme', theme)
+}
 const blurTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const searchInput = ref<{ focus: () => void } | null>(null)
 const MAX_RESULTS = 100
@@ -367,11 +426,53 @@ function clearHistory() {
   localStorage.removeItem('search_history')
 }
 
+// ── 防抖搜索 ──────────────────────────────────────────────────────────────────
+const debounceTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const liveResults = ref<{ code: string; name: string }[]>([])
+const liveLoading = ref(false)
+const liveError = ref('')
+
+function liveSearch(q: string) {
+  if (debounceTimer.value) clearTimeout(debounceTimer.value)
+  const q2 = q.trim()
+  if (!q2 || q2.length < 2) {
+    liveResults.value = []
+    liveError.value = ''
+    return
+  }
+  liveLoading.value = true
+  debounceTimer.value = setTimeout(async () => {
+    try {
+      const res = await stockApi.search(q2)
+      liveResults.value = res.data.stocks ?? []
+      liveError.value = liveResults.value.length === 0 ? 'no-results' : ''
+    } catch {
+      liveResults.value = []
+      liveError.value = 'error'
+    } finally {
+      liveLoading.value = false
+    }
+  }, 280)
+}
+
+// 监听 keyword 变化（防抖实时搜索）
+watch(keyword, (val) => {
+  liveSearch(val)
+  // 清除结果和错误当用户清空输入
+  if (!val.trim()) {
+    results.value = []
+    searchError.value = ''
+    liveResults.value = []
+    liveError.value = ''
+  }
+})
+
 async function search() {
   if (!keyword.value.trim()) return
   saveHistory(keyword.value.trim())
   searching.value = true
   searchError.value = ''
+  liveResults.value = []
   showHistory.value = false
   try {
     const res = await stockApi.search(keyword.value)
@@ -541,6 +642,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 24px;
+  position: relative;
 }
 .search-box {
   margin-left: auto;
@@ -596,6 +698,47 @@ onUnmounted(() => {
   z-index: 100;
   overflow: hidden;
   box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+
+.live-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  z-index: 200;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+.live-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-bottom: 1px solid var(--divider);
+}
+.live-item:last-child { border-bottom: none; }
+.live-item:hover { background: var(--bg-hover); }
+.live-name { font-size: 0.875rem; font-weight: 600; color: var(--text-primary); }
+.live-code { font-size: 0.75rem; color: var(--text-muted); }
+
+.live-no-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  z-index: 200;
+  padding: 10px 14px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 .history-head {
   display: flex;
@@ -1006,4 +1149,99 @@ onUnmounted(() => {
 .stock-name { font-size: 1.1rem; font-weight: 600; }
 .stock-arrow { color: var(--text-muted); }
 .error-msg { color: var(--accent-red); text-align: center; margin-top: 16px; }
+
+/* ── 快捷键提示 ── */
+.kbd-hint-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.kbd-hint-btn:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.kbd-hint-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 240px;
+  z-index: 300;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+.kbd-panel-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 12px;
+}
+.kbd-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.kbd-item { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; }
+.kbd-item kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 2px 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+.kbd-item span { color: var(--text-secondary); }
+.kbd-close {
+  width: 100%;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.kbd-close:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+
+.kbd-fade-enter-active, .kbd-fade-leave-active { transition: opacity 0.15s, transform 0.15s; }
+.kbd-fade-enter-from, .kbd-fade-leave-to { opacity: 0; transform: translateY(-4px); }
+
+/* ── 主题切换按钮 ── */
+.theme-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.theme-btn:hover {
+  border-color: var(--accent-amber);
+  color: var(--accent-amber);
+  background: rgba(245, 158, 11, 0.08);
+}
 </style>
