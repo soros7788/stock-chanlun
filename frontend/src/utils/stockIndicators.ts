@@ -31,14 +31,24 @@ export function calcSKDJ(
 ) {
   const len = closes.length
   const rsv: (number | null)[] = new Array(len).fill(null)
+  // O(n) 滑动窗口：维护最高/最低的累加和，避免内层循环
+  let windowMin = Infinity, windowMax = -Infinity
+  for (let i = 0; i < n - 1; i++) {
+    if (lows[i] < windowMin) windowMin = lows[i]
+    if (highs[i] > windowMax) windowMax = highs[i]
+  }
   for (let i = n - 1; i < len; i++) {
-    let ln = Infinity
-    let hn = -Infinity
-    for (let j = i - n + 1; j <= i; j++) {
-      if (lows[j] < ln) ln = lows[j]
-      if (highs[j] > hn) hn = highs[j]
+    if (i === n - 1) {
+      // 第一个完整窗口已在上方初始化
+    } else {
+      // 滑动窗口：判断移出的元素是否是极值
+      const prev = i - n
+      if (lows[prev] <= windowMin) windowMin = Infinity
+      if (highs[prev] >= windowMax) windowMax = -Infinity
+      if (lows[i] < windowMin) windowMin = lows[i]
+      if (highs[i] > windowMax) windowMax = highs[i]
     }
-    rsv[i] = hn === ln ? 50 : ((closes[i] - ln) / (hn - ln)) * 100
+    rsv[i] = windowMax === windowMin ? 50 : ((closes[i] - windowMin) / (windowMax - windowMin)) * 100
   }
 
   const sk: (number | null)[] = new Array(len).fill(null)

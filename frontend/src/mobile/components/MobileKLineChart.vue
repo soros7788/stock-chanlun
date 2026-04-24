@@ -1,14 +1,46 @@
 <template>
   <div class="kline-wrap">
     <!-- 主图 + 副图 -->
-    <div ref="chartRef" class="kline-chart" />
+    <div
+      ref="chartRef"
+      class="kline-chart"
+      @touchstart="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd"
+    />
 
     <!-- 底部状态栏 -->
     <div v-if="barInfoText" class="bar-info">{{ barInfoText }}</div>
 
-    <!-- 加载遮罩 -->
-    <div v-if="loading" class="chart-loading">
-      <div class="spinner" />
+    <!-- 骨架屏（数据加载中） -->
+    <div v-if="loading" class="chart-skeleton" aria-label="K线加载中">
+      <div class="skel-header">
+        <div class="skel-bar short" />
+        <div class="skel-bar medium" />
+        <div class="skel-bar short" />
+      </div>
+      <div class="skel-chart-area">
+        <div class="skel-candle" style="height:65%;left:4%" />
+        <div class="skel-candle" style="height:48%;left:10%" />
+        <div class="skel-candle" style="height:72%;left:16%" />
+        <div class="skel-candle" style="height:55%;left:22%" />
+        <div class="skel-candle" style="height:80%;left:28%" />
+        <div class="skel-candle" style="height:60%;left:34%" />
+        <div class="skel-candle" style="height:70%;left:40%" />
+        <div class="skel-candle" style="height:45%;left:46%" />
+        <div class="skel-candle" style="height:75%;left:52%" />
+        <div class="skel-candle" style="height:58%;left:58%" />
+        <div class="skel-candle" style="height:68%;left:64%" />
+        <div class="skel-candle" style="height:52%;left:70%" />
+        <div class="skel-candle" style="height:78%;left:76%" />
+        <div class="skel-candle" style="height:62%;left:82%" />
+        <div class="skel-candle" style="height:55%;left:88%" />
+      </div>
+      <div class="skel-ma-row">
+        <div class="skel-dot ma5" />
+        <div class="skel-dot ma20" />
+        <div class="skel-dot ma60" />
+      </div>
     </div>
   </div>
 </template>
@@ -19,6 +51,9 @@ import * as echarts from 'echarts'
 import type { KLine, Bi, XiangSegment, Zhongshu, Signal, AISignal, SupportResistance } from '@/api/stock'
 import type { IndicatorConfig } from '@/stores/chanlun'
 import { calcMACD, calcSKDJ, calcRSI, computeDualMacdSkdjMarkerIndices } from '@/utils/stockIndicators'
+
+const LONG_PRESS_DELAY = 400
+const SWIPE_THRESHOLD = 50
 
 const props = defineProps<{
   klines: KLine[]
@@ -41,6 +76,12 @@ const barInfoText = ref('')
 let chart: echarts.ECharts | null = null
 let graphicRaf = 0
 let resizeObserver: ResizeObserver | null = null
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let touchStartX = 0
+let touchStartY = 0
+let lastTouchX = 0
+let isScrolling = false
+let touchCount = 0
 
 // ── 指标配置 ────────────────────────────────────────────────────────────────
 function getIndicators(): Required<IndicatorConfig> {
@@ -574,6 +615,7 @@ onMounted(() => {
 onUnmounted(() => {
   cancelAnimationFrame(graphicRaf)
   resizeObserver?.disconnect()
+  if (longPressTimer) clearTimeout(longPressTimer)
   if (chart) {
     chart.dispose()
     chart = null
@@ -581,9 +623,81 @@ onUnmounted(() => {
   window.removeEventListener('resize', onResize)
 })
 
+function onTouchStart(e: TouchEvent) {
+  if (e.touches.length === 1) {
+    touchCount = 1
+    touchStartX = e.touches[0].clientX
+    touchStartY = e.touches[0].clientY
+    lastTouchX = touchStartX
+    isScrolling = false
+    longPressTimer = setTimeout(() => {
+      if (!isScrolling && chart) {
+        chart.dispatchAction({ type: 'showTip' })
+      }
+    }, LONG_PRESS_DELAY)
+  } else if (e.touches.length === 2) {
+    touchCount = 2
+    if (longPressTimer) clearTimeout(longPressTimer)
+  }
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (e.touches.length === 1) {
+    const dx = e.touches[0].clientX - touchStartX
+    const dy = e.touches[0].clientY - touchStartY
+    if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
+      isScrolling = true
+    }
+    if (!isScrolling && chart) {
+      const step = (touchStartX - e.touches[0].clientX) * 0.05
+      if (Math.abs(step) >= 1) {
+        chart.dispatchAction({ type: 'dataZoom', start: -step, end: step, dataZoomIndex: 0 })
+        touchStartX = e.touches[0].clientX
+      }
+    }
+    lastTouchX = e.touches[0].clientX
+  } else if (e.touches.length === 2) {
+    if (longPressTimer) clearTimeout(longPressTimer)
+  }
+}
+
+function onTouchEnd(e: TouchEvent) {
+  if (longPressTimer) clearTimeout(longPressTimer)
+  longPressTimer = null
+  if (e.changedTouches.length === 1 && !isScrolling) {
+    const dx = e.changedTouches[0].clientX - touchStartX
+    if (Math.abs(dx) < 5 && Math.abs(e.changedTouches[0].clientY - touchStartY) < 5) {
+      if (chart) {
+        chart.dispatchAction({ type: 'hideTip' })
+      }
+    }
+  }
+  touchCount = 0
+  isScrolling = false
+}
+
+function updateOverlayOnly() {
+  queueGraphic()
+}
+
 watch(
-  () => [props.klines, props.bis, props.zhongshus, props.signals, props.xiangs, props.aiSignal, props.supportResistance, props.indicators],
-  () => nextTick(updateChart),
+  () => props.klines,
+  updateChart
+)
+
+watch(
+  () => [props.bis, props.zhongshus, props.signals, props.xiangs, props.aiSignal, props.supportResistance],
+  updateOverlayOnly,
+  { deep: true }
+)
+
+watch(
+  () => props.indicators,
+  () => {
+    if (!chart) return
+    chart.setOption(buildOption(), { replaceMerge: ['graphic'] })
+    queueGraphic()
+  },
   { deep: true }
 )
 </script>
@@ -618,22 +732,68 @@ watch(
   word-break: break-all;
 }
 
-.chart-loading {
+.chart-skeleton {
   position: absolute;
   inset: 0;
+  padding: 12px 8px 8px;
+  background: var(--bg-elevated);
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.skel-header {
+  display: flex;
+  gap: 8px;
   align-items: center;
-  justify-content: center;
-  background: rgba(6, 8, 12, 0.5);
+  padding-bottom: 4px;
 }
-
-.spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent-blue);
+.skel-bar {
+  height: 14px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-hover) 50%, var(--bg-card) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+.skel-bar.short { width: 20%; }
+.skel-bar.medium { width: 35%; }
+.skel-chart-area {
+  flex: 1;
+  position: relative;
+  border-radius: 6px;
+  overflow: hidden;
+  background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--bg-hover) 50%, var(--bg-secondary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite 0.2s;
+}
+.skel-candle {
+  position: absolute;
+  width: 5%;
+  border-radius: 2px;
+  background: var(--bg-hover);
+  bottom: 0;
+  opacity: 0.5;
+}
+.skel-ma-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding-top: 2px;
+}
+.skel-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-hover) 50%, var(--bg-card) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+.skel-dot.ma5 { background: linear-gradient(90deg, rgba(239,68,68,0.4) 25%, rgba(239,68,68,0.15) 50%, rgba(239,68,68,0.4) 75%); background-size: 200% 100%; }
+.skel-dot.ma20 { background: linear-gradient(90deg, rgba(34,197,94,0.4) 25%, rgba(34,197,94,0.15) 50%, rgba(34,197,94,0.4) 75%); background-size: 200% 100%; }
+.skel-dot.ma60 { background: linear-gradient(90deg, rgba(56,189,248,0.4) 25%, rgba(56,189,248,0.15) 50%, rgba(56,189,248,0.4) 75%); background-size: 200% 100%; }
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
 </style>

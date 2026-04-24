@@ -1,6 +1,29 @@
 <template>
   <div class="kline-wrap">
-    <div ref="chartRef" class="kline-chart" />
+    <!-- 骨架屏：数据加载中时显示 -->
+    <div v-if="loading" class="kline-skeleton">
+      <div class="skeleton-header">
+        <div class="sk-bar sk-w-40" />
+        <div class="sk-bar sk-w-20" />
+        <div class="sk-bar sk-w-30" />
+      </div>
+      <div class="skeleton-candles">
+        <div
+          v-for="i in 40"
+          :key="i"
+          class="sk-candle"
+          :style="{
+            height: `${20 + ((i * 37 + 11) % 60)}%`,
+          }"
+        />
+      </div>
+      <div class="skeleton-footer">
+        <div class="sk-bar sk-w-60" />
+      </div>
+    </div>
+
+    <!-- 实际图表 -->
+    <div v-show="!loading" ref="chartRef" class="kline-chart" />
     <div v-if="barInfoText" class="bar-info">{{ barInfoText }}</div>
   </div>
 </template>
@@ -21,6 +44,7 @@ const props = defineProps<{
   aiSignal?: AISignal | null
   supportResistance?: SupportResistance[]
   indicators?: IndicatorConfig
+  loading?: boolean
 }>()
 
 const chartRef = ref<HTMLDivElement | null>(null)
@@ -96,12 +120,15 @@ function resolveBarRange(start: string, end: string, n: number, dates: string[])
 }
 
 function calcMA(closes: number[], period: number): (number | null)[] {
-  const out: (number | null)[] = []
-  for (let i = 0; i < closes.length; i++) {
-    if (i < period - 1) { out.push(null); continue }
-    let s = 0
-    for (let j = 0; j < period; j++) s += closes[i - j]
-    out.push(s / period)
+  const out: (number | null)[] = new Array(closes.length).fill(null)
+  if (closes.length < period) return out
+  // O(n) 滑动窗口：累加和 - 前一个窗口累加和 = 当前窗口值
+  let windowSum = 0
+  for (let i = 0; i < period; i++) windowSum += closes[i]
+  out[period - 1] = windowSum / period
+  for (let i = period; i < closes.length; i++) {
+    windowSum = windowSum - closes[i - period] + closes[i]
+    out[i] = windowSum / period
   }
   return out
 }
@@ -599,6 +626,23 @@ function updateChart() {
   queueChanlunGraphic()
 }
 
+/**
+ * 局部更新：缠论叠加层数据变化时，只重绘 graphic，不重建整个 chart option。
+ * bis/xiangs/zhongshus/signals/aiSignal/supportResistance 变化时调用。
+ */
+function updateOverlayOnly() {
+  queueChanlunGraphic()
+}
+
+/**
+ * 仅指标配置（MA 显示/隐藏）变化时调用，需要重建 base option。
+ */
+function updateIndicatorOption() {
+  if (!chart) return
+  chart.setOption(buildOption(), { replaceMerge: ['graphic'] })
+  queueChanlunGraphic()
+}
+
 function onResize() {
   chart?.resize()
   queueChanlunGraphic()
@@ -624,8 +668,25 @@ onUnmounted(() => {
 })
 
 watch(
-  () => [props.klines, props.bis, props.zhongshus, props.signals, props.xiangs, props.aiSignal, props.supportResistance, props.indicators],
-  updateChart, { deep: true }
+  () => props.klines,
+  () => {
+    if (!chart) return
+    chart.setOption(buildOption())
+    setBarInfoByIndex(props.klines.length - 1)
+    queueChanlunGraphic()
+  }
+)
+
+watch(
+  () => [props.bis, props.zhongshus, props.signals, props.xiangs, props.aiSignal, props.supportResistance],
+  updateOverlayOnly,
+  { deep: true }
+)
+
+watch(
+  () => props.indicators,
+  updateIndicatorOption,
+  { deep: true }
 )
 </script>
 
@@ -646,5 +707,51 @@ watch(
   border-top: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
   word-break: break-all;
+}
+
+/* ── 骨架屏 ── */
+.kline-skeleton {
+  width: 100%;
+  height: 420px;
+  padding: 16px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.skeleton-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.sk-bar {
+  height: 10px;
+  border-radius: 4px;
+  background: var(--border);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+.sk-w-20 { width: 20%; }
+.sk-w-30 { width: 30%; }
+.sk-w-40 { width: 40%; }
+.sk-w-60 { width: 60%; }
+.skeleton-candles {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 0 4px;
+}
+.sk-candle {
+  flex: 1;
+  border-radius: 2px 2px 0 0;
+  background: var(--text-muted);
+  animation: shimmer 1.4s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+.skeleton-footer {
+  display: flex;
+}
+@keyframes shimmer {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.9; }
 }
 </style>

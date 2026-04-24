@@ -110,43 +110,7 @@
 
             <!-- AI策略 Tab -->
             <div v-if="activeTab === 'ai'" class="tab-ai">
-              <div v-if="aiSignal" class="ai-card card">
-                <div class="ai-header">
-                  <div class="ai-level">{{ aiSignal.level }}</div>
-                  <div class="ai-direction" :class="aiSignal.direction === '买入' ? 'dir-buy' : 'dir-sell'">
-                    {{ aiSignal.direction }}
-                  </div>
-                  <div class="ai-conf">
-                    <div class="confidence-bar">
-                      <div class="confidence-fill" :style="{ width: `${(aiSignal.confidence ?? 0) * 100}%` }" />
-                    </div>
-                    <span class="mono">{{ ((aiSignal.confidence ?? 0) * 100).toFixed(0) }}%</span>
-                  </div>
-                </div>
-                <div class="ai-tags">
-                  <span class="ai-tag">风险: {{ aiSignal.risk_level }}</span>
-                  <span class="ai-tag">周期: {{ aiSignal.holding_period }}</span>
-                </div>
-                <p class="ai-desc">{{ aiSignal.description }}</p>
-                <div v-if="aiSignal.entry_price" class="ai-prices">
-                  <div class="ap-item">入场 <b class="mono price-up">{{ aiSignal.entry_price.toFixed(2) }}</b></div>
-                  <div v-if="aiSignal.stop_loss" class="ap-item">止损 <b class="mono price-down">{{ aiSignal.stop_loss.toFixed(2) }}</b></div>
-                  <div v-if="aiSignal.take_profit" class="ap-item">止盈 <b class="mono price-up">{{ aiSignal.take_profit.toFixed(2) }}</b></div>
-                </div>
-                <div v-if="aiSignal.divergence" class="ai-divergence">
-                  <span class="div-label">背离</span>
-                  <span>{{ aiSignal.divergence.type }} — {{ aiSignal.divergence.probability }}% 概率</span>
-                </div>
-                <div v-if="aiSignal.resonance" class="ai-resonance">
-                  <span class="res-label">共振</span>
-                  <span>{{ aiSignal.resonance.description }}</span>
-                </div>
-              </div>
-              <div v-else-if="loadingAI" class="ai-loading">
-                <div class="spinner" />
-                <span>AI 分析中...</span>
-              </div>
-              <p v-else class="tab-empty">暂无 AI 策略信号</p>
+              <MobileAIChat :stock-code="stockCode" />
             </div>
 
             <!-- 笔记 Tab -->
@@ -166,6 +130,7 @@ import { ref, computed } from 'vue'
 import type { Quote, StockInfoFields, Signal, AISignal } from '@/api/stock'
 import { useCommentStore } from '@/stores/comment'
 import MobileCommentSection from './MobileCommentSection.vue'
+import MobileAIChat from './MobileAIChat.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -178,7 +143,6 @@ const props = defineProps<{
     signals: Signal[]
   } | null
   aiSignal: AISignal | null
-  loadingAI?: boolean
 }>()
 
 defineEmits<{
@@ -533,6 +497,12 @@ const infoRows = computed(() => {
   border-top-color: var(--accent-blue);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+.tab-ai {
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 

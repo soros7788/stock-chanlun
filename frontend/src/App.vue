@@ -1,14 +1,17 @@
 <template>
   <div class="app">
-    <router-view v-slot="{ Component }">
-      <transition name="page" mode="out-in">
-        <component :is="Component" />
-      </transition>
-    </router-view>
+    <ErrorBoundary>
+      <router-view v-slot="{ Component }">
+        <transition name="page" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </router-view>
+    </ErrorBoundary>
   </div>
 </template>
 
 <script setup lang="ts">
+import ErrorBoundary from './components/ErrorBoundary.vue'
 </script>
 
 <style>
