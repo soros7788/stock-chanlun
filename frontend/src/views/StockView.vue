@@ -66,9 +66,9 @@
       </button>
     </div>
 
-    <div v-else class="main-grid">
+    <div v-else class="main-grid" :style="mainGridStyle">
       <!-- Left: Stock info -->
-      <aside class="sidebar">
+      <aside v-if="layout.leftVisible" class="sidebar">
         <div class="card stock-info-card">
           <div class="stock-header">
             <div>
@@ -205,29 +205,93 @@
         <!-- 主图区域上方：基本资料（与左侧行情互补） -->
         <div v-if="infoPanelRows.length > 0 || financeRows.length > 0" class="company-info card">
           <div class="company-info-head">
-            <span class="company-info-title">基本资料</span>
-            <span v-if="stockInfo?.名称" class="company-info-name">{{ stockInfo.名称 }}</span>
+            <div class="company-info-head-left">
+              <span class="company-info-title">基本资料</span>
+              <span v-if="stockInfo?.名称" class="company-info-name">{{ stockInfo.名称 }}</span>
+            </div>
+            <div class="company-info-actions layout-control">
+              <button
+                class="ci-action-btn"
+                :class="{ active: !layout.leftVisible }"
+                @click="layout.leftVisible = !layout.leftVisible"
+                :title="layout.leftVisible ? '隐藏左侧栏' : '显示左侧栏'"
+              >
+                左
+              </button>
+              <button
+                class="ci-action-btn"
+                :class="{ active: !layout.rightVisible }"
+                @click="layout.rightVisible = !layout.rightVisible"
+                :title="layout.rightVisible ? '隐藏右侧栏' : '显示右侧栏'"
+              >
+                右
+              </button>
+              <button class="ci-action-btn ci-action-btn--wide" @click="toggleLayoutPanel" title="布局设置">
+                布局
+              </button>
+
+              <div v-if="showLayoutPanel" class="layout-panel">
+                <div class="lp-title">布局设置</div>
+
+                <div class="lp-row">
+                  <span class="lp-label">左侧栏</span>
+                  <button class="lp-toggle" :class="{ on: layout.leftVisible }" @click="layout.leftVisible = !layout.leftVisible">
+                    {{ layout.leftVisible ? '显示' : '隐藏' }}
+                  </button>
+                </div>
+                <div class="lp-slider" v-if="layout.leftVisible">
+                  <input type="range" min="200" max="360" step="10" v-model.number="layout.leftWidth" />
+                  <span class="lp-val mono">{{ layout.leftWidth }}px</span>
+                </div>
+
+                <div class="lp-row">
+                  <span class="lp-label">右侧栏</span>
+                  <button class="lp-toggle" :class="{ on: layout.rightVisible }" @click="layout.rightVisible = !layout.rightVisible">
+                    {{ layout.rightVisible ? '显示' : '隐藏' }}
+                  </button>
+                </div>
+                <div class="lp-slider" v-if="layout.rightVisible">
+                  <input type="range" min="240" max="460" step="10" v-model.number="layout.rightWidth" />
+                  <span class="lp-val mono">{{ layout.rightWidth }}px</span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="company-info-grid">
-            <div
-              v-for="row in infoPanelRows"
-              :key="row.key"
-              class="company-info-cell"
-            >
-              <span class="ci-label">{{ row.label }}</span>
-              <span
-                class="ci-value mono"
-                :class="row.valueClass"
-              >{{ row.value }}</span>
-            </div>
-            <div
-              v-for="row in financeRows"
-              :key="row.key"
-              class="company-info-cell"
-            >
-              <span class="ci-label">{{ row.label }}</span>
-              <span class="ci-value mono">{{ row.value }}</span>
-            </div>
+          <div class="company-info-sections">
+            <section v-if="infoPanelRows.length" class="ci-section">
+              <div class="ci-section-head">
+                <span class="ci-section-title">基本指标</span>
+              </div>
+              <div class="company-info-grid">
+                <div
+                  v-for="row in infoPanelRows"
+                  :key="row.key"
+                  class="company-info-cell"
+                >
+                  <span class="ci-label">{{ row.label }}</span>
+                  <span
+                    class="ci-value mono"
+                    :class="row.valueClass"
+                  >{{ row.value }}</span>
+                </div>
+              </div>
+            </section>
+
+            <section v-if="financeRows.length" class="ci-section">
+              <div class="ci-section-head">
+                <span class="ci-section-title">市值股本</span>
+              </div>
+              <div class="company-info-grid">
+                <div
+                  v-for="row in financeRows"
+                  :key="row.key"
+                  class="company-info-cell"
+                >
+                  <span class="ci-label">{{ row.label }}</span>
+                  <span class="ci-value mono">{{ row.value }}</span>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
 
@@ -250,84 +314,8 @@
         <SKDJChart v-if="store.indicators.skdj" :klines="store.klines" :zoom-start="zoomStart" :zoom-end="zoomEnd" class="sub-chart" />
       </div>
 
-      <!-- 盘口 / 板块 / 个股新闻（K 线与策略之间的竖栏） -->
-      <aside class="chart-rail">
-        <div class="card rail-card">
-          <div class="card-title">五档盘口</div>
-          <div v-if="hasDepth" class="depth-wrap">
-            <div class="depth-head">
-              <span />
-              <span class="dh-p">价格</span>
-              <span class="dh-v">量</span>
-            </div>
-            <div
-              v-for="(row, i) in depthAsks"
-              :key="'a-' + i"
-              class="depth-row depth-sell"
-            >
-              <span class="depth-lab">卖{{ 5 - i }}</span>
-              <span class="mono depth-price">{{ fmtDepthPrice(row.price) }}</span>
-              <span class="mono depth-vol">{{ fmtDepthVol(row.volume) }}</span>
-            </div>
-            <div class="depth-divider" />
-            <div
-              v-for="(row, i) in depthBids"
-              :key="'b-' + i"
-              class="depth-row depth-buy"
-            >
-              <span class="depth-lab">买{{ i + 1 }}</span>
-              <span class="mono depth-price">{{ fmtDepthPrice(row.price) }}</span>
-              <span class="mono depth-vol">{{ fmtDepthVol(row.volume) }}</span>
-            </div>
-          </div>
-          <p v-else class="rail-empty">暂无盘口数据</p>
-        </div>
-
-        <div class="card rail-card">
-          <div class="card-title">所属板块</div>
-          <div v-if="extras?.boards?.industry" class="sector-main mono">{{ extras.boards.industry }}</div>
-          <p v-else-if="boardHighlightRows.length" class="rail-hint">行业未标注</p>
-          <p v-else class="rail-empty">暂无板块资料</p>
-          <ul v-if="boardHighlightRows.length" class="board-highlights">
-            <li v-for="(h, idx) in boardHighlightRows" :key="'bh-' + idx">
-              <span class="bh-lab">{{ h.label }}</span>
-              <span class="bh-val mono">{{ h.value }}</span>
-            </li>
-          </ul>
-        </div>
-
-        <div class="card rail-card rail-card-news">
-          <div class="card-title">公司新闻</div>
-          <div v-if="extras?.news?.length" class="news-rail-list">
-            <template v-for="(n, idx) in extras.news" :key="'sn-' + idx">
-              <a
-                v-if="n.url"
-                :href="n.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="news-rail-item"
-              >
-                <span class="news-rail-title">{{ n.title }}</span>
-                <span class="news-rail-meta">
-                  <span v-if="n.source" class="news-rail-src">{{ n.source }}</span>
-                  <span v-if="n.time" class="news-rail-time">{{ n.time }}</span>
-                </span>
-              </a>
-              <div v-else class="news-rail-item news-rail-item--nolink">
-                <span class="news-rail-title">{{ n.title }}</span>
-                <span class="news-rail-meta">
-                  <span v-if="n.source" class="news-rail-src">{{ n.source }}</span>
-                  <span v-if="n.time" class="news-rail-time">{{ n.time }}</span>
-                </span>
-              </div>
-            </template>
-          </div>
-          <p v-else class="rail-empty">暂无相关新闻</p>
-        </div>
-      </aside>
-
       <!-- Right: AI Strategy + Notes -->
-      <aside class="sidebar-right">
+      <aside v-if="layout.rightVisible" class="sidebar-right">
         <AIChat :stock-code="stockCode" />
         <CommentSection :stock-code="stockCode" />
         <StrategyCard :signal="store.aiSignal" :updated-at="store.aiUpdatedAt" />
@@ -393,6 +381,89 @@ const error = computed(() =>
 const quote = ref<Quote | null>(null)
 const stockInfo = ref<StockInfoFields | null>(null)
 const extras = ref<StockExtras | null>(null)
+
+type StockViewLayout = {
+  leftVisible: boolean
+  rightVisible: boolean
+  leftWidth: number
+  rightWidth: number
+}
+
+const LAYOUT_KEY = 'chanstock_stockview_layout_v1'
+const layout = ref<StockViewLayout>({
+  leftVisible: true,
+  rightVisible: true,
+  leftWidth: 240,
+  rightWidth: 280,
+})
+
+const showLayoutPanel = ref(false)
+let layoutPanelClickHandler: ((e: MouseEvent) => void) | null = null
+
+function toggleLayoutPanel() {
+  showLayoutPanel.value = !showLayoutPanel.value
+  if (showLayoutPanel.value) {
+    nextTick(() => {
+      layoutPanelClickHandler = (e: MouseEvent) => {
+        const el = document.querySelector('.layout-control')
+        if (el && !el.contains(e.target as Node)) {
+          showLayoutPanel.value = false
+          cleanupLayoutPanelHandler()
+        }
+      }
+      setTimeout(() => document.addEventListener('click', layoutPanelClickHandler!), 0)
+    })
+  } else {
+    cleanupLayoutPanelHandler()
+  }
+}
+
+function cleanupLayoutPanelHandler() {
+  if (layoutPanelClickHandler) {
+    document.removeEventListener('click', layoutPanelClickHandler)
+    layoutPanelClickHandler = null
+  }
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n))
+}
+
+function loadLayout() {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Partial<StockViewLayout>
+    layout.value = {
+      leftVisible: parsed.leftVisible ?? true,
+      rightVisible: parsed.rightVisible ?? true,
+      leftWidth: clamp(Number(parsed.leftWidth ?? 240) || 240, 200, 360),
+      rightWidth: clamp(Number(parsed.rightWidth ?? 280) || 280, 240, 460),
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function persistLayout() {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout.value))
+  } catch {
+    // ignore
+  }
+}
+
+const mainGridStyle = computed(() => {
+  const cols = [
+    layout.value.leftVisible ? `${layout.value.leftWidth}px` : null,
+    'minmax(0, 1fr)',
+    layout.value.rightVisible ? `${layout.value.rightWidth}px` : null,
+  ].filter(Boolean)
+
+  return {
+    gridTemplateColumns: cols.join(' '),
+  }
+})
 
 // 时间筛选
 function getOneYearAgo(): string {
@@ -609,33 +680,7 @@ const financeRows = computed((): InfoRow[] => {
   return rows
 })
 
-const depthAsks = computed(() => extras.value?.depth?.asks ?? [])
-const depthBids = computed(() => extras.value?.depth?.bids ?? [])
-const hasDepth = computed(() => {
-  const d = extras.value?.depth
-  if (!d) return false
-  const ok = (rows: { price: number; volume: number }[]) =>
-    rows.some(r => r.price > 0 || r.volume > 0)
-  return ok(d.asks) || ok(d.bids)
-})
-
-/** 与顶部「行业」主标题去重，避免列表里再显示一行行业 */
-const boardHighlightRows = computed(() => {
-  const list = extras.value?.boards?.highlights ?? []
-  return list.filter(h => h.label !== '行业' && !/^行业/.test(h.label))
-})
-
-function fmtDepthPrice(p: number) {
-  if (p == null || Number.isNaN(p) || p <= 0) return '—'
-  return p.toFixed(2)
-}
-
-function fmtDepthVol(v: number) {
-  if (v == null || Number.isNaN(v) || v <= 0) return '—'
-  if (v >= 1e8) return (v / 1e8).toFixed(2) + '亿'
-  if (v >= 1e4) return (v / 1e4).toFixed(2) + '万'
-  return String(Math.round(v))
-}
+// 注：已移除个股页中间竖栏（盘口/板块/新闻），相关展示逻辑不再需要
 
 async function loadData() {
   const code = stockCode.value
@@ -735,15 +780,19 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
+  loadLayout()
   loadData()
   window.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  cleanupLayoutPanelHandler()
 })
 
 watch(() => route.params.code, loadData)
+
+watch(layout, persistLayout, { deep: true })
 </script>
 
 <style scoped>
@@ -857,7 +906,6 @@ watch(() => route.params.code, loadData)
 
 .main-grid {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 272px 280px;
   gap: 16px;
   padding: 16px 24px;
   max-width: 1760px;
@@ -865,7 +913,7 @@ watch(() => route.params.code, loadData)
   align-items: start;
 }
 
-.sidebar, .chart-rail { display: flex; flex-direction: column; gap: 12px; }
+.sidebar { display: flex; flex-direction: column; gap: 12px; }
 
 .sidebar-right {
   display: flex;
@@ -882,136 +930,6 @@ watch(() => route.params.code, loadData)
 }
 .sidebar-right::-webkit-scrollbar { width: 5px; }
 .sidebar-right::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-
-.chart-rail {
-  min-width: 0;
-  max-height: calc(100vh - 72px);
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-.chart-rail::-webkit-scrollbar { width: 5px; }
-.chart-rail::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-
-.rail-card { padding: 12px 14px; }
-.rail-card-news { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.rail-empty {
-  margin: 6px 0 0;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-.rail-hint { margin: 4px 0 0; font-size: 0.72rem; color: var(--text-secondary); }
-
-.depth-wrap { margin-top: 4px; }
-.depth-head {
-  display: grid;
-  grid-template-columns: 2.2rem 1fr 1fr;
-  gap: 4px;
-  font-size: 0.65rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 6px;
-}
-.dh-p, .dh-v { text-align: right; }
-.depth-row {
-  display: grid;
-  grid-template-columns: 2.2rem 1fr 1fr;
-  gap: 4px;
-  align-items: center;
-  font-size: 0.78rem;
-  padding: 3px 0;
-}
-.depth-lab { color: var(--text-muted); font-size: 0.72rem; }
-.depth-price { text-align: right; font-weight: 600; }
-.depth-vol { text-align: right; font-size: 0.72rem; color: var(--text-secondary); }
-.depth-sell .depth-price { color: var(--accent-green); }
-.depth-buy .depth-price { color: var(--accent-red); }
-.depth-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 6px 0;
-  opacity: 0.85;
-}
-
-.sector-main {
-  margin-top: 6px;
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: var(--accent-blue);
-  line-height: 1.35;
-}
-.board-highlights {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.board-highlights li {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-}
-.board-highlights li:last-child { border-bottom: none; padding-bottom: 0; }
-.bh-lab { font-size: 0.65rem; color: var(--text-muted); }
-.bh-val { font-size: 0.74rem; color: var(--text-secondary); word-break: break-all; }
-
-.news-rail-list {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 120px;
-  max-height: 320px;
-  padding-right: 2px;
-}
-.news-rail-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  text-decoration: none;
-  color: inherit;
-  transition: border-color 0.15s, background 0.15s;
-}
-.news-rail-item:hover:not(.news-rail-item--nolink) {
-  border-color: var(--accent-blue);
-  background: var(--bg-hover);
-}
-.news-rail-item--nolink {
-  cursor: default;
-  opacity: 0.85;
-}
-.news-rail-title {
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--text-primary);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.news-rail-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 0.65rem;
-  color: var(--text-muted);
-}
-.news-rail-src {
-  color: var(--accent-blue);
-  font-weight: 600;
-}
 
 .stock-info-card { padding: 16px; }
 .stock-header {
@@ -1081,17 +999,99 @@ watch(() => route.params.code, loadData)
 .chart-timestamp { font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; }
 .sub-chart { height: 100px; }
 
+.layout-control { position: relative; }
+.layout-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  z-index: 120;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+}
+.lp-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+}
+.lp-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.lp-row + .lp-row { margin-top: 10px; }
+.lp-label { font-size: 0.78rem; color: var(--text-secondary); font-weight: 600; }
+.lp-toggle {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.lp-toggle.on {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(14, 165, 233, 0.35);
+  color: var(--accent-blue);
+}
+.lp-slider {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lp-slider input[type="range"] { flex: 1; }
+.lp-val { font-size: 0.72rem; color: var(--text-muted); min-width: 56px; text-align: right; }
+
 .company-info {
-  padding: 12px 14px;
+  padding: 14px 16px;
   flex-shrink: 0;
 }
 .company-info-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
+.company-info-head-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.company-info-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.ci-action-btn {
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.15s;
+  line-height: 1.2;
+}
+.ci-action-btn:hover {
+  border-color: rgba(14, 165, 233, 0.35);
+  color: var(--text-primary);
+}
+.ci-action-btn.active {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(14, 165, 233, 0.35);
+  color: var(--accent-blue);
+}
+.ci-action-btn--wide { font-weight: 800; padding: 4px 12px; }
 .company-info-title {
   font-size: 0.72rem;
   font-weight: 700;
@@ -1106,27 +1106,62 @@ watch(() => route.params.code, loadData)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 55%;
+  max-width: 520px;
+}
+.company-info-sections {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+}
+.ci-section {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 12px 12px 10px;
+  min-width: 0;
+}
+.ci-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.ci-section-title {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 .company-info-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px 14px;
 }
 .company-info-cell {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 .ci-label {
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   color: var(--text-muted);
+  letter-spacing: 0.02em;
 }
 .ci-value {
-  font-size: 0.8125rem;
-  font-weight: 600;
+  font-size: 0.88rem;
+  font-weight: 700;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+@media (max-width: 1320px) {
+  .company-info-sections { grid-template-columns: 1fr; }
+}
+@media (max-width: 980px) {
+  .company-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* 时间筛选器样式 */
@@ -1262,7 +1297,6 @@ watch(() => route.params.code, loadData)
 
 @media (max-width: 1320px) {
   .main-grid { grid-template-columns: 220px minmax(0, 1fr) 280px; }
-  .chart-rail { display: none; }
 }
 @media (max-width: 1200px) {
   .main-grid { grid-template-columns: 200px 1fr; }

@@ -337,6 +337,22 @@ function applyChanlunGraphic() {
   const children: any[] = []
   const finder = { xAxisIndex: 0, yAxisIndex: 0 } as const
 
+  const opt = (chart as any).getOption?.()
+  const dz0 = opt?.dataZoom?.[0]
+  const vStart = dz0?.startValue ?? 0
+  const vEnd = dz0?.endValue ?? (lastDates.length - 1)
+  const viewS = Math.max(0, Math.min(Number(vStart) || 0, lastDates.length - 1))
+  const viewE = Math.max(viewS, Math.min(Number(vEnd) || (lastDates.length - 1), lastDates.length - 1))
+
+  const pixelCache = new Map<string, [number, number] | null>()
+  const pixelAtIdxCached = (i: number, price: number): [number, number] | null => {
+    const key = `${i}:${price}`
+    if (pixelCache.has(key)) return pixelCache.get(key) ?? null
+    const pt = pixelAtIdx(i, price)
+    pixelCache.set(key, pt)
+    return pt
+  }
+
   let gridLeft = 0
   let gridRight = 800
   try {
@@ -351,9 +367,10 @@ function applyChanlunGraphic() {
 
   // ── 中枢 ───────────────────────────────────────
   for (const zs of zhongshus) {
+    if (zs._e < viewS || zs._s > viewE) continue
     if (zs._e < zs._s) continue
-    const a = pixelAtIdx(zs._s, zs.range_high)
-    const b = pixelAtIdx(zs._e, zs.range_low)
+    const a = pixelAtIdxCached(zs._s, zs.range_high)
+    const b = pixelAtIdxCached(zs._e, zs.range_low)
     if (!a || !b) continue
     const xPx1 = Math.min(a[0], b[0])
     const xPx2 = Math.max(a[0], b[0])
@@ -391,9 +408,10 @@ function applyChanlunGraphic() {
 
   // ── 笔 ─────────────────────────────────────────
   for (const bi of bis) {
+    if (bi._e < viewS || bi._s > viewE) continue
     if (bi._e < bi._s) continue
-    const p1 = pixelAtIdx(bi._s, bi.direction === 'up' ? bi.low : bi.high)
-    const p2 = pixelAtIdx(bi._e, bi.direction === 'up' ? bi.high : bi.low)
+    const p1 = pixelAtIdxCached(bi._s, bi.direction === 'up' ? bi.low : bi.high)
+    const p2 = pixelAtIdxCached(bi._e, bi.direction === 'up' ? bi.high : bi.low)
     if (!p1 || !p2) continue
     const color = bi.direction === 'up' ? '#f85149' : '#3fb950'
     children.push({
@@ -403,13 +421,29 @@ function applyChanlunGraphic() {
       z: 102,
       silent: true
     })
+    // 端点强调（更好读）
+    children.push({
+      type: 'circle',
+      shape: { cx: p1[0], cy: p1[1], r: 2.8 },
+      style: { fill: color, stroke: '#0d1117', lineWidth: 1 },
+      z: 103,
+      silent: true
+    })
+    children.push({
+      type: 'circle',
+      shape: { cx: p2[0], cy: p2[1], r: 2.8 },
+      style: { fill: color, stroke: '#0d1117', lineWidth: 1 },
+      z: 103,
+      silent: true
+    })
   }
 
   // ── 线段 ───────────────────────────────────────
   for (const xiang of xiangs) {
+    if (xiang._e < viewS || xiang._s > viewE) continue
     if (xiang._e < xiang._s) continue
-    const p1 = pixelAtIdx(xiang._s, xiang.high)
-    const p2 = pixelAtIdx(xiang._e, xiang.low)
+    const p1 = pixelAtIdxCached(xiang._s, xiang.high)
+    const p2 = pixelAtIdxCached(xiang._e, xiang.low)
     if (!p1 || !p2) continue
     const color = xiang.direction === 'up' ? '#ffe066' : '#ff9f7f'
     children.push({
@@ -425,7 +459,8 @@ function applyChanlunGraphic() {
   const sellColors: Record<string, string> = { '一卖': '#f85149', '二卖': '#ff7b72', '三卖': '#da3633' }
 
   for (const sig of signals) {
-    const pt = pixelAtIdx(sig._idx, sig.price)
+    if (sig._idx < viewS || sig._idx > viewE) continue
+    const pt = pixelAtIdxCached(sig._idx, sig.price)
     if (!pt) continue
     const color = buyColors[sig.type] || sellColors[sig.type] || '#d29922'
     const isBuy = sig.type.includes('买')
@@ -456,7 +491,7 @@ function applyChanlunGraphic() {
 
   // ── 支撑阻力线 ─────────────────────────────────
   for (const lvl of supportResistance) {
-    const yp = pixelAtIdx(0, lvl.price)?.[1]
+    const yp = pixelAtIdxCached(viewS, lvl.price)?.[1]
     if (yp == null || !Number.isFinite(yp)) continue
     const isSupport = lvl.type === 'support'
     const color = isSupport ? '#3fb950' : '#f85149'
@@ -491,7 +526,7 @@ function applyChanlunGraphic() {
   if (aiSignal) {
     const entryColor = aiSignal.direction === '买入' ? '#3fb950' : '#f85149'
     const hLine = (price: number, stroke: string, dash: number[], lw: number) => {
-      const yp = pixelAtIdx(0, price)?.[1]
+      const yp = pixelAtIdxCached(viewS, price)?.[1]
       if (yp == null || !Number.isFinite(yp)) return
       children.push({
         type: 'line',
@@ -503,7 +538,7 @@ function applyChanlunGraphic() {
     }
     if (aiSignal.entry_price != null) {
       hLine(aiSignal.entry_price, entryColor, [7, 4], 1.5)
-      const yy = pixelAtIdx(0, aiSignal.entry_price)?.[1]
+      const yy = pixelAtIdxCached(viewS, aiSignal.entry_price)?.[1]
       if (yy != null) {
         children.push({
           type: 'text',
@@ -514,7 +549,7 @@ function applyChanlunGraphic() {
     }
     if (aiSignal.stop_loss != null) {
       hLine(aiSignal.stop_loss, '#f85149', [3, 3], 1.2)
-      const yy = pixelAtIdx(0, aiSignal.stop_loss)?.[1]
+      const yy = pixelAtIdxCached(viewS, aiSignal.stop_loss)?.[1]
       if (yy != null) {
         children.push({
           type: 'text',
@@ -525,7 +560,7 @@ function applyChanlunGraphic() {
     }
     if (aiSignal.take_profit != null) {
       hLine(aiSignal.take_profit, '#3fb950', [3, 3], 1.2)
-      const yy = pixelAtIdx(0, aiSignal.take_profit)?.[1]
+      const yy = pixelAtIdxCached(viewS, aiSignal.take_profit)?.[1]
       if (yy != null) {
         children.push({
           type: 'text',

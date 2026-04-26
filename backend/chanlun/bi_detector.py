@@ -21,12 +21,38 @@ class BiDetector:
         self._fenxing_detector = FenxingDetector(klines)
         self._fenxings: list[Fenxing] = []
 
+    @staticmethod
+    def compress_fenxings(fenxings: list[Fenxing]) -> list[Fenxing]:
+        """
+        压缩分型序列：连续同类型分型仅保留更“极值”的那个。
+        - 连续 top：保留 high 更高者
+        - 连续 bottom：保留 low 更低者
+        """
+        if not fenxings:
+            return []
+
+        out: list[Fenxing] = [fenxings[0]]
+        for fx in fenxings[1:]:
+            last = out[-1]
+            if fx.type != last.type:
+                out.append(fx)
+                continue
+
+            if fx.type == "top":
+                if fx.high >= last.high:
+                    out[-1] = fx
+            else:  # bottom
+                if fx.low <= last.low:
+                    out[-1] = fx
+
+        return out
+
     def detect(self, min_bars: int = 5) -> list[Bi]:
         """
         检测所有笔
         min_bars: 笔最少K线数（默认5根）
         """
-        self._fenxings = self._fenxing_detector.detect()
+        self._fenxings = self.compress_fenxings(self._fenxing_detector.detect())
         if len(self._fenxings) < 2:
             return []
 
