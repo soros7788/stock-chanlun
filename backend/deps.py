@@ -1,0 +1,54 @@
+"""FastAPI dependencies: client IP and rate-limit guards."""
+from __future__ import annotations
+
+from fastapi import HTTPException, Request
+
+from utils import (
+    ai_diagnosis_global_limiter,
+    ai_diagnosis_ip_limiter,
+    chanlun_global_limiter,
+    chanlun_ip_limiter,
+    kline_global_limiter,
+    kline_ip_limiter,
+)
+
+
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+def check_chanlun_rate_limits(ip: str) -> None:
+    """Global + per-IP limits for 缠论 / AI 策略等重计算接口."""
+    if not chanlun_global_limiter.try_acquire("global"):
+        raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
+    if not chanlun_ip_limiter.try_acquire(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="缠论分析请求过于频繁，请稍后再试",
+        )
+
+
+def check_kline_rate_limits(ip: str) -> None:
+    """Global + per-IP limits for K 线 / 导出等行情拉取接口."""
+    if not kline_global_limiter.try_acquire("global"):
+        raise HTTPException(status_code=429, detail="行情服务繁忙，请稍后重试")
+    if not kline_ip_limiter.try_acquire(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="K 线请求过于频繁，请稍后再试",
+        )
+
+
+def check_ai_diagnosis_rate_limits(ip: str) -> None:
+    if not ai_diagnosis_global_limiter.try_acquire("global"):
+        raise HTTPException(status_code=429, detail="AI 诊股服务繁忙，请稍后重试")
+    if not ai_diagnosis_ip_limiter.try_acquire(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="AI 诊股请求过于频繁，请稍后再试",
+        )

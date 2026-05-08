@@ -110,34 +110,43 @@ class DivergenceDetector:
         if s1_df.empty or s2_df.empty:
             return None
 
-        macd1 = macd_area(s1_df['bar'])
-        macd2 = macd_area(s2_df['bar'])
+        macd1 = float(macd_area(s1_df["bar"]))
+        macd2 = float(macd_area(s2_df["bar"]))
+        # 避免 macd1==0 时除零（部分新股/极短区间柱和为 0）
+        if macd1 <= 1e-15:
+            return None
 
         if seg_type == "bottom":
             # 底背驰: 价格新低，但MACD面积（力度）减小
-            price1 = seg1.low
-            price2 = seg2.low
+            price1 = float(seg1.low)
+            price2 = float(seg2.low)
+            if price1 <= 1e-12:
+                return None
             if price2 < price1 and macd2 < macd1 * 0.85:
-                prob = min(1.0, (1 - macd2 / macd1) + 0.5)
+                ratio = macd2 / macd1
+                prob = min(1.0, (1 - ratio) + 0.5)
                 return {
                     "type": "bottom",
                     "probability": round(prob, 2),
                     "price_drop": round(abs(price2 - price1) / price1, 3),
-                    "macd_ratio": round(macd2 / macd1, 2),
-                    "description": f"价格新低{money(price2-price1):.2f}但力度减弱至{macd2/macd1:.0%}"
+                    "macd_ratio": round(ratio, 2),
+                    "description": f"价格新低{money(price2-price1):.2f}但力度减弱至{ratio:.0%}"
                 }
         else:
             # 顶背驰: 价格新高，但MACD面积（力度）减小
-            price1 = seg1.high
-            price2 = seg2.high
+            price1 = float(seg1.high)
+            price2 = float(seg2.high)
+            if price1 <= 1e-12:
+                return None
             if price2 > price1 and macd2 < macd1 * 0.85:
-                prob = min(1.0, (1 - macd2 / macd1) + 0.5)
+                ratio = macd2 / macd1
+                prob = min(1.0, (1 - ratio) + 0.5)
                 return {
                     "type": "top",
                     "probability": round(prob, 2),
                     "price_rise": round(abs(price2 - price1) / price1, 3),
-                    "macd_ratio": round(macd2 / macd1, 2),
-                    "description": f"价格新高{money(price2-price1):.2f}但力度减弱至{macd2/macd1:.0%}"
+                    "macd_ratio": round(ratio, 2),
+                    "description": f"价格新高{money(price2-price1):.2f}但力度减弱至{ratio:.0%}"
                 }
         return None
 

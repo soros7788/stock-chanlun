@@ -173,10 +173,10 @@ class RateLimiter:
             self._counts.pop(key, None)
 
 
-# 全局限流器：每分钟 120 次缠论分析请求
-chanlun_limiter = RateLimiter(max_calls=120, window_seconds=60.0)
-
-# 全局限流器：每分钟 300 次 K 线请求
-kline_limiter = RateLimiter(max_calls=300, window_seconds=60.0)
-
-
+# ── 限流：全局限流 + 按客户端 IP（见 deps.check_*）──────────────────────────
+chanlun_global_limiter = RateLimiter(max_calls=500, window_seconds=60.0)
+chanlun_ip_limiter = RateLimiter(max_calls=90, window_seconds=60.0)
+kline_global_limiter = RateLimiter(max_calls=1000, window_seconds=60.0)
+kline_ip_limiter = RateLimiter(max_calls=200, window_seconds=60.0)
+ai_diagnosis_global_limiter = RateLimiter(max_calls=120, window_seconds=60.0)
+ai_diagnosis_ip_limiter = RateLimiter(max_calls=30, window_seconds=60.0)

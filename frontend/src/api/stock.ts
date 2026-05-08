@@ -1,8 +1,38 @@
 import axios from 'axios'
 
+/**
+ * 与 FastAPI 约定一致：所有业务接口挂在 `/api` 下。
+ * - 开发：相对路径走 Vite 代理（支持 base 子路径 `/stock-chanlun/api`）
+ * - 生产：若只填了域名（如 https://x.railway.app），自动补 `/api`
+ */
+export function resolveApiBaseURL(): string {
+  const raw = import.meta.env.VITE_API_BASE_URL
+  const custom = raw != null ? String(raw).trim() : ''
+  if (custom !== '') {
+    let u = custom.replace(/\/+$/, '')
+    if (/^https?:\/\//i.test(u)) {
+      try {
+        const { pathname } = new URL(u)
+        if (pathname === '/' || pathname === '') {
+          u = `${u}/api`
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    return u
+  }
+  const base = import.meta.env.BASE_URL || '/'
+  if (base === '/' || base === '') {
+    return '/api'
+  }
+  const normalized = base.endsWith('/') ? base : `${base}/`
+  const joined = `${normalized}api`.replace(/([^:]\/)\/+/g, '$1')
+  return joined.replace(/\/+$/, '') || '/api'
+}
+
 const api = axios.create({
-  // 生产环境使用环境变量中的后端地址，开发环境使用相对路径（Vite 代理）
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: resolveApiBaseURL(),
   timeout: 60000,
 })
 
@@ -455,9 +485,9 @@ export const stockApi = {
     sessionId = 'default',
     model = 'deepseek'
   ): AsyncGenerator<string, void, unknown> {
-    const base = import.meta.env.VITE_API_BASE_URL || ''
+    const root = resolveApiBaseURL()
     const encodedQuestion = encodeURIComponent(question)
-    const url = `${base}/api/ai/diagnosis?code=${encodeURIComponent(code)}&question=${encodedQuestion}&session_id=${encodeURIComponent(sessionId)}&model=${encodeURIComponent(model)}`
+    const url = `${root}/ai/diagnosis?code=${encodeURIComponent(code)}&question=${encodedQuestion}&session_id=${encodeURIComponent(sessionId)}&model=${encodeURIComponent(model)}`
 
     const resp = await fetch(url)
     if (!resp.ok) {

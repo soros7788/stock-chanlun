@@ -105,7 +105,19 @@ def parse_llm_response(text: str) -> dict:
             raw = text.strip()
 
     try:
-        return json.loads(raw)
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+        return {
+            "direction": "观望",
+            "confidence": 0.0,
+            "risk_level": "中",
+            "entry_price": None,
+            "stop_loss": None,
+            "take_profit": None,
+            "holding_period": "未知",
+            "reasoning": f"LLM 返回非 JSON 对象：{type(data).__name__}",
+        }
     except json.JSONDecodeError:
         return {
             "direction": "观望",
