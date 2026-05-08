@@ -1,0 +1,38 @@
+"""Runtime configuration from environment (loaded before HTTP patches)."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except ImportError:
+    pass
+
+
+def _truthy(name: str, default: bool = False) -> bool:
+    v = os.environ.get(name, "").strip().lower()
+    if v == "":
+        return default
+    return v in ("1", "true", "yes", "on")
+
+
+# Comma-separated origins, or "*" for any origin (browser credentials disabled)
+CORS_ORIGINS_RAW: str = os.environ.get("CORS_ORIGINS", "*").strip()
+
+# When True: disable TLS verification for patched finance HTTP (legacy Windows/proxy setups)
+FINANCE_TLS_RELAXED: bool = _truthy("FINANCE_TLS_RELAXED", default=False)
+
+
+def cors_allow_origins() -> list[str]:
+    if CORS_ORIGINS_RAW == "*":
+        return ["*"]
+    parts = [p.strip() for p in CORS_ORIGINS_RAW.split(",") if p.strip()]
+    return parts if parts else ["*"]
+
+
+def cors_allow_credentials() -> bool:
+    # Browsers reject credentials with wildcard origins
+    return cors_allow_origins() != ["*"]

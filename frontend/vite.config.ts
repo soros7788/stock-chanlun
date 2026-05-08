@@ -5,6 +5,22 @@ import { resolve } from 'path'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const basePath = (env.VITE_BASE_URL || '/stock-chanlun/').replace(/\/+$/, '')
+  const apiProxy = {
+    target: 'http://127.0.0.1:8000',
+    changeOrigin: true,
+  } as const
+  const proxy: Record<string, { target: string; changeOrigin: boolean; rewrite?: (p: string) => string }> = {
+    '/api': { ...apiProxy },
+  }
+  if (basePath) {
+    const prefix = `${basePath}/api`
+    const esc = basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    proxy[prefix] = {
+      ...apiProxy,
+      rewrite: (path: string) => path.replace(new RegExp(`^${esc}/api`), '/api'),
+    }
+  }
 
   return {
     plugins: [
@@ -66,16 +82,23 @@ export default defineConfig(({ mode }) => {
     base: env.VITE_BASE_URL || '/stock-chanlun/',
     server: {
       port: 5173,
-      proxy: {
-        '/api': {
-          target: 'http://localhost:8000',
-          changeOrigin: true
-        }
-      }
+      proxy,
     },
     build: {
       outDir: 'dist',
-      assetsDir: 'assets'
+      assetsDir: 'assets',
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+
+            if (id.includes('echarts')) return 'vendor-echarts'
+            if (id.includes('vue-router')) return 'vendor-router'
+            if (id.includes('pinia')) return 'vendor-pinia'
+            if (id.includes('/vue/')) return 'vendor-vue'
+          },
+        },
+      },
     }
   }
 })

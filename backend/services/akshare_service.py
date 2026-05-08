@@ -485,16 +485,19 @@ _EM_PUSH_BASES = (
 
 def _em_clist_request(params: dict, *, timeout: float = 25.0) -> dict | None:
     """依次尝试各 push 域名请求 api/qt/clist/get，成功返回 JSON dict。
-    用 requests 直接调用（可被 run_server.py 的补丁拦截，禁用代理+verify=False）。"""
+    用 requests 直接调用（可被 http_adapter_patch 拦截：禁用代理；TLS 校验见 FINANCE_TLS_RELAXED）。"""
+    from config import FINANCE_TLS_RELAXED
+
     import requests as _req
     _no_proxy = {"http": None, "https": None}
+    verify_tls = not FINANCE_TLS_RELAXED
     for base in _EM_PUSH_BASES:
         try:
             resp = _req.get(
                 f"{base}/api/qt/clist/get",
                 params=params,
                 timeout=timeout,
-                verify=False,
+                verify=verify_tls,
                 proxies=_no_proxy,
                 headers={"Referer": "https://quote.eastmoney.com/"},
             )

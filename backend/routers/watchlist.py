@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+import asyncio
+
+from fastapi import APIRouter
+from services.akshare_service import get_realtime_quote, normalize_stock_code
+from stores.local_json import get_watchlist_map, watchlist_add, watchlist_remove
+
+router = APIRouter()
+
+
+def _get_watchlist_response():
+    wl = get_watchlist_map()
+    if not wl:
+        return {"stocks": []}
+
+    codes = list(wl.keys())
+    df = get_realtime_quote(codes)
+    if df.empty:
+        return {"stocks": [], "total": 0}
+
+    return {
+        "stocks": [
+            {
+                "code": str(row.get("代码", "")),
+                "name": str(row.get("名称", "")),
+                "price": float(row.get("最新价", 0) or 0),
+                "change_pct": float(row.get("涨跌幅", 0) or 0),
+                "added_at": wl.get(str(row.get("代码", "")), ""),
+            }
+            for _, row in df.iterrows()
+        ],
+        "total": len(wl),
+    }
+
+
+@router.get("/api/watchlist", tags=["自选"])
+async def get_watchlist():
+    return await asyncio.to_thread(_get_watchlist_response)
+
+
+@router.post("/api/watchlist/{code}", tags=["自选"])
+async def add_watchlist(code: str):
+    sym, _ = normalize_stock_code(code)
+    added_at, is_new = watchlist_add(sym)
+    wl = get_watchlist_map()
+    return {
+        "code": sym,
+        "added": True,
+        "added_at": added_at,
+        "total": len(wl),
+    }
+
+
+@router.delete("/api/watchlist/{code}", tags=["自选"])
+async def remove_watchlist(code: str):
+    sym, _ = normalize_stock_code(code)
+    watchlist_remove(sym)
+    wl = get_watchlist_map()
+    return {"code": sym, "removed": True, "total": len(wl)}

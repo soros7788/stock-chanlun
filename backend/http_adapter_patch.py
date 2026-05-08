@@ -1,0 +1,31 @@
+"""
+Monkey-patch requests HTTPAdapter.send for finance hosts: no proxy, optional TLS relax.
+Must be imported before any code that triggers requests to eastmoney / tencent quote, etc.
+"""
+from __future__ import annotations
+
+import requests as _req_mod
+
+from config import FINANCE_TLS_RELAXED
+
+_NO_PROXY = {"http": None, "https": None}
+_EM_HOSTS = ("eastmoney", "qt.gtimg", "sinajs", "ifzq", "10jqka")
+_orig_send = _req_mod.adapters.HTTPAdapter.send
+
+
+def _patched_send(adapter, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
+    url = getattr(request, "url", "") or ""
+    if timeout is None and url:
+        timeout = 12.0
+    if proxies is None and url and any(h in url for h in _EM_HOSTS):
+        proxies = _NO_PROXY
+        if FINANCE_TLS_RELAXED:
+            verify = False
+    return _orig_send(adapter, request, stream=stream, timeout=timeout, verify=verify, cert=cert, proxies=proxies)
+
+
+_req_mod.adapters.HTTPAdapter.send = _patched_send
+print(
+    f"[补丁] requests: timeout=12s + 禁用代理 for finance hosts; "
+    f"FINANCE_TLS_RELAXED={FINANCE_TLS_RELAXED}"
+)

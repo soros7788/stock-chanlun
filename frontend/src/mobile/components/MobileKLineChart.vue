@@ -249,14 +249,31 @@ function applyGraphicOverlay() {
     return
   }
 
+  const opt = (chart as any).getOption?.()
+  const dz0 = opt?.dataZoom?.[0]
+  const vStart = dz0?.startValue ?? 0
+  const vEnd = dz0?.endValue ?? (lastDates.length - 1)
+  const viewS = Math.max(0, Math.min(Number(vStart) || 0, lastDates.length - 1))
+  const viewE = Math.max(viewS, Math.min(Number(vEnd) || (lastDates.length - 1), lastDates.length - 1))
+
+  const pixelCache = new Map<string, [number, number] | null>()
+  const pixelAtIdxCached = (i: number, price: number): [number, number] | null => {
+    const key = `${i}:${price}`
+    if (pixelCache.has(key)) return pixelCache.get(key) ?? null
+    const pt = pixelAtIdx(i, price)
+    pixelCache.set(key, pt)
+    return pt
+  }
+
   const children: any[] = []
   const [gridLeft, gridRight] = getGridBounds()
 
   // ── 中枢 ────────────────────────────────────────────────────────
   for (const zs of data.zhongshus) {
+    if (zs._e < viewS || zs._s > viewE) continue
     if (zs._e < zs._s) continue
-    const a = pixelAtIdx(zs._s, zs.range_high)
-    const b = pixelAtIdx(zs._e, zs.range_low)
+    const a = pixelAtIdxCached(zs._s, zs.range_high)
+    const b = pixelAtIdxCached(zs._e, zs.range_low)
     if (!a || !b) continue
     const xPx1 = Math.min(a[0], b[0])
     const xPx2 = Math.max(a[0], b[0])
@@ -274,20 +291,26 @@ function applyGraphicOverlay() {
 
   // ── 笔 ─────────────────────────────────────────────────────────
   for (const bi of data.bis) {
+    if (bi._e < viewS || bi._s > viewE) continue
     if (bi._e < bi._s) continue
-    const p1 = pixelAtIdx(bi._s, bi.direction === 'up' ? bi.low : bi.high)
-    const p2 = pixelAtIdx(bi._e, bi.direction === 'up' ? bi.high : bi.low)
+    const p1 = pixelAtIdxCached(bi._s, bi.direction === 'up' ? bi.low : bi.high)
+    const p2 = pixelAtIdxCached(bi._e, bi.direction === 'up' ? bi.high : bi.low)
     if (!p1 || !p2) continue
     const color = bi.direction === 'up' ? UP_COLOR : DOWN_COLOR
     children.push({ type: 'line', shape: { x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1] },
       style: { stroke: color, lineWidth: 2.5, opacity: 0.85 }, z: 102, silent: true })
+    children.push({ type: 'circle', shape: { cx: p1[0], cy: p1[1], r: 2.6 },
+      style: { fill: color, stroke: '#06080c', lineWidth: 1 }, z: 103, silent: true })
+    children.push({ type: 'circle', shape: { cx: p2[0], cy: p2[1], r: 2.6 },
+      style: { fill: color, stroke: '#06080c', lineWidth: 1 }, z: 103, silent: true })
   }
 
   // ── 线段 ───────────────────────────────────────────────────────
   for (const xiang of data.xiangs) {
+    if (xiang._e < viewS || xiang._s > viewE) continue
     if (xiang._e < xiang._s) continue
-    const p1 = pixelAtIdx(xiang._s, xiang.high)
-    const p2 = pixelAtIdx(xiang._e, xiang.low)
+    const p1 = pixelAtIdxCached(xiang._s, xiang.high)
+    const p2 = pixelAtIdxCached(xiang._e, xiang.low)
     if (!p1 || !p2) continue
     const color = xiang.direction === 'up' ? '#ffe066' : '#ff9f7f'
     children.push({ type: 'line', shape: { x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1] },
@@ -298,7 +321,8 @@ function applyGraphicOverlay() {
   const buyColors: Record<string, string> = { '一买': DOWN_COLOR, '二买': '#38bdf8', '三买': '#f59e0b' }
   const sellColors: Record<string, string> = { '一卖': UP_COLOR, '二卖': '#ff7b72', '三卖': '#da3633' }
   for (const sig of data.signals) {
-    const pt = pixelAtIdx(sig._idx, sig.price)
+    if (sig._idx < viewS || sig._idx > viewE) continue
+    const pt = pixelAtIdxCached(sig._idx, sig.price)
     if (!pt) continue
     const color = buyColors[sig.type] || sellColors[sig.type] || '#f59e0b'
     const isBuy = sig.type.includes('买')
@@ -311,7 +335,7 @@ function applyGraphicOverlay() {
 
   // ── 支撑阻力线 ──────────────────────────────────────────────────
   for (const lvl of data.supportResistance) {
-    const yp = pixelAtIdx(0, lvl.price)?.[1]
+    const yp = pixelAtIdxCached(viewS, lvl.price)?.[1]
     if (yp == null || !Number.isFinite(yp)) continue
     const isSupport = lvl.type === 'support'
     const color = isSupport ? DOWN_COLOR : UP_COLOR
@@ -331,7 +355,7 @@ function applyGraphicOverlay() {
     const ai = data.aiSignal
     const entryColor = ai.direction === '买入' ? DOWN_COLOR : UP_COLOR
     const hLine = (price: number, stroke: string, dash: number[], lw: number, label: string) => {
-      const yp = pixelAtIdx(0, price)?.[1]
+      const yp = pixelAtIdxCached(viewS, price)?.[1]
       if (yp == null) return
       children.push({ type: 'line', shape: { x1: gridLeft, y1: yp, x2: gridRight, y2: yp },
         style: { stroke, lineWidth: lw, opacity: 0.8, lineDash: dash }, z: 99, silent: true })
@@ -345,7 +369,8 @@ function applyGraphicOverlay() {
 
   // ── MACD+SKDJ 双金叉标记 ─────────────────────────────────────────
   for (const idx of data.dualCrossIndices) {
-    const pt = pixelAtIdx(idx, props.klines[idx].close)
+    if (idx < viewS || idx > viewE) continue
+    const pt = pixelAtIdxCached(idx, props.klines[idx].close)
     if (!pt) continue
     children.push({ type: 'circle', shape: { cx: pt[0], cy: pt[1], r: 6 },
       style: { fill: '#ffe066', stroke: '#06080c', lineWidth: 2 }, z: 105, silent: true })

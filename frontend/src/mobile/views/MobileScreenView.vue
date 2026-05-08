@@ -150,7 +150,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { stockApi, type StockScreenResult } from '@/api/stock'
+import { resolveApiBaseURL, stockApi, type StockScreenResult } from '@/api/stock'
 
 const router = useRouter()
 
@@ -226,7 +226,7 @@ async function doScreen() {
     if (p.pe_max != null) qs.set('pe_max', String(p.pe_max))
     if (p.pb_max != null) qs.set('pb_max', String(p.pb_max))
     if (p.signals) qs.set('signals', p.signals)
-    const resp = await fetch(`/api/stocks/screen-stream?${qs.toString()}`)
+    const resp = await fetch(`${resolveApiBaseURL()}/stocks/screen-stream?${qs.toString()}`)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const reader = resp.body!.getReader()
     const decoder = new TextDecoder()
